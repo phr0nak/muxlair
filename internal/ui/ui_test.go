@@ -1,0 +1,684 @@
+package ui
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
+
+	"github.com/phr0nak/muxlair/internal/agents"
+	"github.com/phr0nak/muxlair/internal/config"
+)
+
+func TestGroupLabels(t *testing.T) {
+	got := groupLabels([]string{"/a/x/null", "/b/y/null", "/c/twinpeaks", "/d/x/null2"})
+	want := map[string]string{"/a/x/null": "x/null", "/b/y/null": "y/null", "/c/twinpeaks": "twinpeaks", "/d/x/null2": "null2"}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: got %q want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestMouse(t *testing.T) {
+	m := New(Options{Mouse: true}, "")
+	m.height = 20
+	m.sessions = []agents.Session{
+		{Agent: "claude", ID: "1", Cwd: "/a", Updated: time.Now()},
+		{Agent: "codex", ID: "2", Cwd: "/b", Updated: time.Now().Add(-time.Minute)},
+	}
+	m.rebuild() // rows: /a header, s1, spacer, /b header, s2
+	click := func(y int) tea.Cmd {
+		nm, cmd := m.mouse(tea.MouseMsg{X: 3, Y: y + firstRowY, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+		m = nm.(Model)
+		return cmd
+	}
+	if click(1) != nil || m.cur != 1 {
+		t.Fatalf("single click: cur=%d", m.cur)
+	}
+	if click(1) == nil {
+		t.Fatal("double click did not open")
+	}
+	if click(2) != nil || m.cur != 1 {
+		t.Fatalf("spacer click moved the cursor: cur=%d", m.cur)
+	}
+	click(3) // header /b
+	if !m.collapsed["/b"] || len(m.rows) != 4 {
+		t.Fatalf("header click: collapsed=%v rows=%d", m.collapsed, len(m.rows))
+	}
+	nm, _ := m.mouse(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	if m = nm.(Model); m.cur != 1 {
+		t.Fatalf("wheel up skipped no spacer: cur=%d", m.cur)
+	}
+}
+
+func TestClickDoesNotScroll(t *testing.T) {
+	m := New(Options{Mouse: true}, "")
+	m.height = 20 + chromeRows // 20 visible rows
+	for i := 0; i < 40; i++ {
+		m.sessions = append(m.sessions, agents.Session{Agent: "claude", ID: string(rune('a' + i)), Cwd: "/a", Updated: time.Now()})
+	}
+	m.rebuild()
+	press := tea.MouseMsg{Y: 15 + firstRowY, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	nm, _ := m.Update(press)
+	m = nm.(Model)
+	if m.cur != 15 || m.top != 0 {
+		t.Fatalf("after click: cur=%d top=%d", m.cur, m.top)
+	}
+	if _, cmd := m.Update(press); cmd == nil {
+		t.Fatal("second click on same row did not open")
+	}
+}
+
+func TestFooterAtBottom(t *testing.T) {
+	m := New(Options{}, "")
+	m.height = 10
+	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Cwd: "/a", Updated: time.Now()}}
+	m.rebuild()
+	lines := strings.Split(m.View(), "\n")
+	if len(lines) != 10 || !strings.Contains(lines[9], "quit") {
+		t.Fatalf("got %d lines, last %q", len(lines), lines[len(lines)-1])
+	}
+}
+
+func TestRenameKeys(t *testing.T) {
+	m := New(Options{}, "")
+	m.height = 20
+	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Name: "old", Cwd: "/a", Updated: time.Now()}}
+	m.rebuild()
+	m.cur = 1
+	press := func(k tea.KeyMsg) tea.Cmd {
+		nm, cmd := m.Update(k)
+		m = nm.(Model)
+		return cmd
+	}
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if m.editing == nil || m.editBuf != "old" {
+		t.Fatalf("r did not start rename: %+v", m.editing)
+	}
+	press(tea.KeyMsg{Type: tea.KeyBackspace})
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")}) // capital letters are text here, not refresh
+	if m.editBuf != "olD" {
+		t.Fatalf("buf %q", m.editBuf)
+	}
+	if press(tea.KeyMsg{Type: tea.KeyEnter}) == nil || m.editing != nil {
+		t.Fatal("enter did not submit")
+	}
+}
+
+func TestRenameEditorScrolls(t *testing.T) {
+	m := New(Options{}, "")
+	m.height, m.width = 20, 50
+	s := agents.Session{Agent: "codex", Name: strings.Repeat("x", 100) + "END"}
+	m.editing, m.editBuf = &s, s.Name
+	if v := m.View(); !strings.Contains(v, "END█") {
+		t.Fatalf("cursor end not visible:\n%s", v)
+	}
+}
+
+func TestRenameEditorWideChars(t *testing.T) {
+	m := New(Options{}, "")
+	m.height, m.width = 20, 50
+	s := agents.Session{Agent: "codex", Name: strings.Repeat("漢", 30) + "終"}
+	m.editing, m.editBuf = &s, s.Name
+	for _, l := range strings.Split(m.View(), "\n") {
+		if ansi.StringWidth(l) > 50 {
+			t.Fatalf("line wider than terminal (50): %q", l)
+		}
+	}
+	if v := m.View(); !strings.Contains(v, "終█") {
+		t.Fatalf("cursor end not visible:\n%s", v)
+	}
+}
+
+func TestFoldAndResize(t *testing.T) {
+	m := New(Options{Details: true}, "")
+	m.height, m.width = 30, 140
+	m.sessions = []agents.Session{
+		{Agent: "claude", ID: "1", Cwd: "/a", Updated: time.Now()},
+		{Agent: "codex", ID: "2", Cwd: "/b", Updated: time.Now().Add(-time.Minute)},
+	}
+	m.rebuild()
+	m.cur = 1 // session in /a
+	key := func(s string) {
+		k := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+		switch s {
+		case "left":
+			k = tea.KeyMsg{Type: tea.KeyLeft}
+		case "right":
+			k = tea.KeyMsg{Type: tea.KeyRight}
+		}
+		nm, _ := m.Update(k)
+		m = nm.(Model)
+	}
+	key("left")
+	if !m.collapsed["/a"] || m.cur != 0 {
+		t.Fatalf("left: collapsed=%v cur=%d", m.collapsed, m.cur)
+	}
+	key("right")
+	if m.collapsed["/a"] || len(m.rows) != 5 {
+		t.Fatalf("right: collapsed=%v rows=%d", m.collapsed, len(m.rows))
+	}
+	_, before := m.split()
+	key("<")
+	if _, after := m.split(); after != before+4 {
+		t.Fatalf("< : %d -> %d", before, after)
+	}
+	lw, _ := m.split()
+	drag := func(a tea.MouseAction, x int) {
+		nm, _ := m.Update(tea.MouseMsg{X: x, Y: 5, Action: a, Button: tea.MouseButtonLeft})
+		m = nm.(Model)
+	}
+	drag(tea.MouseActionPress, lw+1)
+	drag(tea.MouseActionMotion, 100)
+	drag(tea.MouseActionRelease, 100)
+	if _, dw := m.split(); dw != 140-100-2 || m.dragging {
+		t.Fatalf("drag: dw=%d dragging=%v", dw, m.dragging)
+	}
+}
+
+func TestRefreshStatusClears(t *testing.T) {
+	m := New(Options{}, "")
+	m.status = "refreshing…"
+	nm, _ := m.Update(loadedMsg{})
+	if s := nm.(Model).status; s != "" {
+		t.Fatalf("status %q", s)
+	}
+}
+
+func TestDragClamped(t *testing.T) {
+	m := New(Options{Details: true}, "")
+	m.height, m.width = 30, 140
+	lw, _ := m.split()
+	for _, ev := range []tea.MouseMsg{
+		{X: lw + 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft},
+		{X: 139, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft},
+	} {
+		nm, _ := m.Update(ev)
+		m = nm.(Model)
+	}
+	if _, dw := m.split(); dw != 24 {
+		t.Fatalf("dragged to the edge: dw=%d, want minimum 24", dw)
+	}
+}
+
+func TestAutoDeleteSelection(t *testing.T) {
+	m := New(Options{AutoDelete: 10 * time.Minute}, "")
+	old := time.Now().Add(-time.Hour)
+	m.sessions = []agents.Session{
+		{Agent: "codex", ID: "headless-old", Headless: true, Updated: old},
+		{Agent: "claude", ID: "headless-running", Headless: true, PID: 1, Updated: old},
+		{Agent: "codex", ID: "headless-maybe", Headless: true, MaybeLive: true, Updated: old},
+		{Agent: "claude", ID: "headless-recent", Headless: true, Updated: time.Now()},
+		{Agent: "claude", ID: "interactive-old", Updated: old},
+	}
+	if m.autoDelete() == nil || !m.autoBusy {
+		t.Fatal("no batch for an old exited headless session")
+	}
+	m.rebuild()
+	for i, r := range m.rows {
+		if r.s != nil && r.s.ID == "headless-old" {
+			m.cur = i
+		}
+	}
+	if m.open(false) != nil {
+		t.Fatal("opened a session that is being auto-deleted")
+	}
+	if m.autoDelete() != nil {
+		t.Fatal("started a second batch while one runs")
+	}
+	m.autoBusy = false
+	m.autoDel["codex:headless-old"] = true // failed before
+	if m.autoDelete() != nil {
+		t.Fatal("retried a failed session, or picked an ineligible one")
+	}
+	off := New(Options{}, "")
+	if off.autoDelete() != nil {
+		t.Fatal("ran with auto-delete off")
+	}
+}
+
+func TestSettingsPopup(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	m := New(config.Defaults(), cfg)
+	m.height, m.width = 30, 120
+	key := func(s string) tea.Cmd {
+		k := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+		switch s {
+		case "down":
+			k = tea.KeyMsg{Type: tea.KeyDown}
+		case "right":
+			k = tea.KeyMsg{Type: tea.KeyRight}
+		case "enter":
+			k = tea.KeyMsg{Type: tea.KeyEnter}
+		case "esc":
+			k = tea.KeyMsg{Type: tea.KeyEsc}
+		}
+		nm, cmd := m.Update(k)
+		m = nm.(Model)
+		return cmd
+	}
+	key("s")
+	if m.settings == nil || !strings.Contains(m.View(), "Settings") {
+		t.Fatal("s did not open settings")
+	}
+	key(" ") // mouse off
+	key("down")
+	key("down")
+	key("down")
+	key("right") // auto-delete 10m -> 30m
+	key("esc")
+	if m.settings != nil || !m.opts.Mouse {
+		t.Fatal("esc applied changes")
+	}
+	if _, err := os.Stat(cfg); !os.IsNotExist(err) {
+		t.Fatal("esc wrote the file")
+	}
+	key("s")
+	key(" ")
+	key("down")
+	key("down")
+	key("down")
+	key("right")
+	key("down") // Save
+	key("enter")
+	if m.settings != nil || m.opts.Mouse || m.opts.AutoDelete != 30*time.Minute {
+		t.Fatalf("save not applied: %+v", m.opts)
+	}
+	got, err := config.Load(cfg)
+	if err != nil || got != m.opts {
+		t.Fatalf("file: %+v %v", got, err)
+	}
+}
+
+func TestConfigReload(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	m := New(config.Defaults(), cfg)
+	m.showDetails = false // user pressed i
+	os.WriteFile(cfg, []byte(`{"color_tabs": false}`), 0o600)
+	nm, _ := m.Update(configMsg{})
+	m = nm.(Model)
+	if m.opts.ColorTabs || m.showDetails {
+		t.Fatalf("reload: opts=%+v showDetails=%v (details setting unchanged, so i stays)", m.opts, m.showDetails)
+	}
+	os.WriteFile(cfg, []byte(`{broken`), 0o600)
+	nm, _ = m.Update(configMsg{})
+	m = nm.(Model)
+	if m.opts.ColorTabs || !strings.Contains(m.status, "config not applied") {
+		t.Fatalf("broken file: opts=%+v status=%q", m.opts, m.status)
+	}
+}
+
+func TestAutoDeleteChoicesKeepCustom(t *testing.T) {
+	c := autoDeleteChoices(90 * time.Second)
+	found := false
+	for i, d := range c {
+		if d == 90*time.Second {
+			found = true
+		}
+		if i > 0 && c[i-1] >= d {
+			t.Fatal("not sorted")
+		}
+	}
+	if !found {
+		t.Fatal("custom value dropped")
+	}
+}
+
+func TestSettingsClickOverDivider(t *testing.T) {
+	m := New(config.Defaults(), filepath.Join(t.TempDir(), "config.json"))
+	m.height, m.width = 30, 120
+	m.settings = &settingsForm{opts: m.opts}
+	lw, _ := m.split()
+	nm, _ := m.Update(tea.MouseMsg{X: lw + 1, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if nm.(Model).dragging {
+		t.Fatal("click inside the settings popup started a divider drag")
+	}
+}
+
+func TestAutoDeleteMessagesUseIDs(t *testing.T) {
+	m := New(Options{}, "")
+	nm, _ := m.Update(autoDeletedMsg{deleted: []string{"codex 01a18e76-b797"}})
+	if s := nm.(Model).status; s != "auto-deleted codex 01a18e76-b797 (in ~/.muxlair/trash)" {
+		t.Fatalf("one: %q", s)
+	}
+	nm, _ = m.Update(autoDeletedMsg{failed: []string{"codex:x"}, err: "codex 01a18e76-b797: boom"})
+	if s := nm.(Model).status; s != "auto-delete codex 01a18e76-b797: boom" {
+		t.Fatalf("failed: %q", s)
+	}
+}
+
+func TestHelpPopup(t *testing.T) {
+	m := New(Options{}, "")
+	m.height, m.width = 30, 120
+	m.opts.Mouse = true
+	lines := strings.Split(m.View(), "\n")
+	if !strings.HasPrefix(strings.TrimLeft(ansi.Strip(lines[len(lines)-1]), " "), "? keys") {
+		t.Fatalf("bottom bar does not start with ? keys: %q", lines[len(lines)-1])
+	}
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	m = nm.(Model)
+	v := m.View()
+	if !m.help || !strings.Contains(v, "Keys") || !strings.Contains(v, "resize details") {
+		t.Fatalf("? did not show the keys popup:\n%s", v)
+	}
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if m = nm.(Model); m.help || m.confirm != nil {
+		t.Fatal("a key closing help also acted on the list")
+	}
+}
+
+func TestFooterCentered(t *testing.T) {
+	m := New(Options{}, "")
+	m.height, m.width = 20, 200
+	m.status = "hello"
+	lines := strings.Split(m.View(), "\n")
+	last := lines[len(lines)-1]
+	if pad := len(last) - len(strings.TrimLeft(last, " ")); pad != (200-5)/2 {
+		t.Fatalf("footer pad %d: %q", pad, last)
+	}
+}
+
+func TestHelpReachableEverywhere(t *testing.T) {
+	// Every height from tiny to roomy, at a narrow and a wide width: no panic,
+	// everything reachable (19 rows once hit body fits but hint doesn't).
+	for h := 7; h <= 30; h++ {
+		helpReachable(t, h, 44)
+		helpReachable(t, h, 120)
+	}
+	for _, size := range [][2]int{} {
+		helpReachable(t, size[0], size[1])
+	}
+}
+
+// helpReachable scrolls the keys popup to the end and checks every word of
+// every description was on screen at some point.
+func helpReachable(t *testing.T, h, w int) {
+	m := New(Options{}, "")
+	m.height, m.width = h, w
+	m.help = true
+	var screens strings.Builder
+	for i := 0; i < 3*len(keyHelp); i++ {
+		screens.WriteString(ansi.Strip(m.View()))
+		nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = nm.(Model)
+		if !m.help {
+			t.Fatal("down closed the help")
+		}
+	}
+	for _, k := range keyHelp {
+		for _, word := range strings.Fields(k[1]) {
+			if !strings.Contains(screens.String(), word) {
+				t.Errorf("%dx%d: %q never shown (from %q)", w, h, word, k[1])
+			}
+		}
+	}
+	// Clamped: one up after over-scrolling moves the view at once.
+	before := m.helpTop
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if before > 0 && nm.(Model).helpTop != before-1 {
+		t.Errorf("%dx%d: up after over-scrolling: %d -> %d", w, h, before, nm.(Model).helpTop)
+	}
+}
+
+func TestHelpScrollClampedOnResize(t *testing.T) {
+	m := New(Options{}, "")
+	m.height, m.width, m.help = 7, 44, true
+	for i := 0; i < 40; i++ {
+		nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = nm.(Model)
+	}
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 44, Height: 20})
+	m = nm.(Model)
+	if m.helpTop != m.helpMaxTop() {
+		t.Fatalf("helpTop %d not clamped to %d", m.helpTop, m.helpMaxTop())
+	}
+	if top := m.helpTop; top > 0 {
+		nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		if nm.(Model).helpTop != top-1 {
+			t.Fatal("up did not move right after the resize")
+		}
+	}
+}
+
+func TestFolderCount(t *testing.T) {
+	m := New(Options{}, "")
+	m.height, m.width = 20, 100
+	m.sessions = []agents.Session{
+		{Agent: "claude", ID: "1", Name: "alpha", Cwd: "/a", Updated: time.Now()},
+		{Agent: "codex", ID: "2", Name: "beta", Cwd: "/a", Updated: time.Now()},
+		{Agent: "codex", ID: "3", Name: "gamma", Cwd: "/b", Updated: time.Now()},
+	}
+	m.rebuild()
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "a (2)") || !strings.Contains(v, "b (1)") {
+		t.Fatalf("counts missing:\n%s", v)
+	}
+	m.filter = "alpha"
+	m.rebuild()
+	if v = ansi.Strip(m.View()); !strings.Contains(v, "a (1)") {
+		t.Fatalf("count ignores the filter:\n%s", v)
+	}
+}
+
+func TestDetailsSelectionCopiesWrappedPath(t *testing.T) {
+	m := New(Options{Details: true}, "")
+	m.height, m.width = 30, 120
+	long := "/very/long/folder/" + strings.Repeat("segment/", 10) + "end"
+	m.sessions = []agents.Session{{Agent: "claude", ID: "abc-123", Name: "n", Cwd: long, Updated: time.Now()}}
+	m.rebuild()
+	m.cur = 1
+	lw, dw := m.split()
+	det := m.detailsPane(dw)
+	// Find the Folder line and how many lines its wrapped path takes.
+	first, last := -1, -1
+	for i, l := range det {
+		p := ansi.Strip(l)
+		if strings.HasPrefix(strings.TrimSpace(p), "Folder") {
+			first = i
+		} else if first >= 0 && last < 0 && !strings.HasPrefix(p, strings.Repeat(" ", 11)) {
+			last = i - 1
+		}
+	}
+	if first < 0 || last <= first {
+		t.Fatalf("expected a wrapped Folder line: first=%d last=%d\n%s", first, last, strings.Join(det, "\n"))
+	}
+	press := func(a tea.MouseAction, x, y int) {
+		nm, _ := m.Update(tea.MouseMsg{X: lw + 2 + x, Y: y + 1, Action: a, Button: tea.MouseButtonLeft})
+		m = nm.(Model)
+	}
+	press(tea.MouseActionPress, 11, first) // start of the value, after the label
+	press(tea.MouseActionMotion, dw-1, last)
+	if got := m.selectedText(); got != long {
+		t.Fatalf("selected %q, want %q", got, long)
+	}
+	lipgloss.SetColorProfile(termenv.ANSI) // tests have no terminal; force styles on to see the highlight
+	defer lipgloss.SetColorProfile(termenv.Ascii)
+	if !strings.Contains(m.View(), "\x1b[7m") {
+		t.Fatal("selection not highlighted")
+	}
+	// A plain click selects nothing.
+	press(tea.MouseActionRelease, dw-1, last)
+	press(tea.MouseActionPress, 3, first)
+	press(tea.MouseActionRelease, 3, first)
+	if m.sel != nil {
+		t.Fatal("plain click left a selection")
+	}
+}
+
+func TestSelectionKeepsPathSpacesAndKeyCancelsDrag(t *testing.T) {
+	m := New(Options{Details: true}, "")
+	m.height, m.width = 30, 120
+	_, dw := m.split()
+	// A path with spaces exactly where it will wrap.
+	room := dw - 12
+	long := "/x/" + strings.Repeat("a", room-4) + " b" + strings.Repeat(" c", room) + "/end"
+	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Name: "n", Cwd: long, Updated: time.Now()}}
+	m.rebuild()
+	m.cur = 1
+	det := m.detailsPane(dw)
+	first, last := -1, -1
+	for i, l := range det {
+		p := ansi.Strip(l)
+		if strings.HasPrefix(strings.TrimSpace(p), "Folder") {
+			first = i
+		} else if first >= 0 && last < 0 && !strings.HasPrefix(p, strings.Repeat(" ", 11)) {
+			last = i - 1
+		}
+	}
+	m.sel = &selection{11, first, dw - 1, last}
+	if got := m.selectedText(); got != long {
+		t.Fatalf("spaces lost:\n got %q\nwant %q", got, long)
+	}
+	// A key during a drag ends it; the next motion must not crash.
+	m.selecting = true
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = nm.(Model)
+	nm, _ = m.Update(tea.MouseMsg{X: 100, Y: 5, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft})
+	nm, _ = nm.(Model).Update(tea.MouseMsg{X: 100, Y: 5, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+}
+
+func TestDetailsNeverTruncateAndSelectionCopiesFullID(t *testing.T) {
+	m := New(Options{Details: true}, "")
+	m.height, m.width = 30, 100 // details pane ~40 wide: a UUID line doesn't fit
+	id := "00000000-0000-4000-8000-000000000001"
+	m.sessions = []agents.Session{{Agent: "codex", ID: id, Name: "n", Cwd: "/a", Updated: time.Now()}}
+	m.rebuild()
+	m.cur = 1
+	_, dw := m.split()
+	det := m.detailsPane(dw)
+	row := -1
+	for i, l := range det {
+		if ansi.StringWidth(l) > dw {
+			t.Fatalf("line %d wider than the pane: %q", i, ansi.Strip(l))
+		}
+		if strings.Contains(l, "…") && !strings.Contains(l, "loading…") {
+			t.Fatalf("line %d truncated: %q", i, ansi.Strip(l))
+		}
+		if strings.HasPrefix(strings.TrimSpace(ansi.Strip(l)), "Session") {
+			row = i
+		}
+	}
+	m.sel = &selection{11, row, dw - 1, row + 1}
+	if got := strings.ReplaceAll(m.selectedText(), "\n", ""); !strings.HasPrefix(got, id) {
+		t.Fatalf("copied %q, want the full id %q", got, id)
+	}
+	// Details arriving mid-drag cancel the selection.
+	m.selecting = true
+	nm, _ := m.Update(detailsMsg{key: "codex:" + id})
+	if nm.(Model).sel != nil || nm.(Model).selecting {
+		t.Fatal("selection survived a details update")
+	}
+}
+
+func TestLongNameCappedAndResizeClearsSelection(t *testing.T) {
+	m := New(Options{Details: true}, "")
+	m.height, m.width = 30, 120
+	m.sessions = []agents.Session{{Agent: "claude", ID: "id-1", Name: strings.Repeat("word ", 300), Cwd: "/a", Updated: time.Now()}}
+	m.rebuild()
+	m.cur = 1
+	m.details["claude:id-1"] = detailEntry{loaded: time.Now(), updated: m.sessions[0].Updated}
+	_, dw := m.split()
+	v := ansi.Strip(strings.Join(m.detailsPane(dw), "\n"))
+	for _, want := range []string{"Session", "Status", "Cost", "Folder"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("%s pushed out by a long name:\n%s", want, v)
+		}
+	}
+	m.sel = &selection{11, 2, 20, 2}
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if nm.(Model).sel != nil {
+		t.Fatal("selection survived a resize")
+	}
+	if strings.Contains(ansi.Strip(m.View()), "d  x") {
+		t.Fatal("x still listed")
+	}
+}
+
+func TestXDoesNotDelete(t *testing.T) {
+	m := New(Options{}, "")
+	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Cwd: "/a", Updated: time.Now()}}
+	m.rebuild()
+	m.cur = 1
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if nm.(Model).confirm != nil {
+		t.Fatal("x opened the delete prompt")
+	}
+}
+
+func TestSelectionGuards(t *testing.T) {
+	m := New(Options{Details: true}, "")
+	m.height, m.width = 30, 120
+	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Name: "short", Cwd: "/a", Updated: time.Now()}}
+	m.rebuild()
+	m.cur = 1
+	lw, _ := m.split()
+	press := tea.MouseMsg{X: lw + 15, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	// A popup is modal: no selection underneath it.
+	s := m.sessions[0]
+	m.confirm = &s
+	nm, _ := m.Update(press)
+	if nm.(Model).sel != nil {
+		t.Fatal("selection started behind the delete popup")
+	}
+	m.confirm = nil
+	nm, _ = m.Update(press)
+	m = nm.(Model)
+	if m.sel == nil {
+		t.Fatal("no selection")
+	}
+	// A refresh that changes what the pane shows cancels it.
+	renamed := []agents.Session{{Agent: "claude", ID: "1", Name: strings.Repeat("long name ", 20), Cwd: "/a", Updated: s.Updated}}
+	nm, _ = m.Update(loadedMsg{sessions: renamed})
+	if nm.(Model).sel != nil {
+		t.Fatal("selection survived a refresh that reflowed the pane")
+	}
+	// One that changes nothing keeps it.
+	nm, _ = m.Update(loadedMsg{sessions: m.sessions})
+	if nm.(Model).sel == nil {
+		t.Fatal("an unchanged refresh dropped the selection")
+	}
+}
+
+func TestBottomBarTrimmed(t *testing.T) {
+	m := New(Options{Mouse: true}, "")
+	m.height, m.width = 20, 300
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	last := lines[len(lines)-1]
+	for _, gone := range []string{"resize", "fold", "double-click"} {
+		if strings.Contains(last, gone) {
+			t.Errorf("bottom bar still has %q: %q", gone, last)
+		}
+	}
+	if !strings.Contains(last, "? keys") {
+		t.Errorf("bottom bar lost ? keys: %q", last)
+	}
+}
+
+func TestResizeReadout(t *testing.T) {
+	m := New(Options{Details: true}, "")
+	m.height, m.width = 30, 200
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("<")})
+	m = nm.(Model)
+	_, dw := m.split()
+	want := fmt.Sprintf("details %d%% · %d columns", dw*100/200, dw)
+	if !strings.Contains(ansi.Strip(m.View()), want) || cmd == nil {
+		t.Fatalf("no readout %q after <", want)
+	}
+	// A stale timer (from an earlier resize) doesn't hide a newer readout.
+	nm, _ = m.Update(resizeShownMsg{at: m.resizedAt.Add(-time.Second)})
+	if nm.(Model).resizedAt.IsZero() {
+		t.Fatal("stale timer cleared the readout")
+	}
+	nm, _ = m.Update(resizeShownMsg{at: m.resizedAt})
+	if !nm.(Model).resizedAt.IsZero() || strings.Contains(ansi.Strip(nm.(Model).View()), "columns") {
+		t.Fatal("readout didn't go away")
+	}
+}

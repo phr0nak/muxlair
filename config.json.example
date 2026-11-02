@@ -1,0 +1,6 @@
+{
+  "mouse": true,
+  "color_tabs": true,
+  "details": true,
+  "auto_delete_headless": "10m"
+}
