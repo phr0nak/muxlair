@@ -1,5 +1,8 @@
 # muxlair
 
+[![CI](https://github.com/phr0nak/muxlair/actions/workflows/ci.yml/badge.svg)](https://github.com/phr0nak/muxlair/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists your Claude Code and Codex sessions grouped by the folder they ran in. From there you can jump to a running session, reopen an old one, rename it or clean it up, using the keyboard or the mouse, inside [tmux](https://github.com/tmux/tmux) or [cmux](https://cmux.com).
 
 ### Why "muxlair"?
