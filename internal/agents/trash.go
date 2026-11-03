@@ -21,6 +21,9 @@ type trashMeta struct {
 	Cwd       string            `json:"cwd"`
 	DeletedAt time.Time         `json:"deletedAt"`
 	Files     map[string]string `json:"files"` // trash name -> original path
+	// RestoredAt is set when a Codex entry was restored; its backup stays, so the
+	// entry is kept and must not be restored twice.
+	RestoredAt *time.Time `json:"restoredAt,omitempty"`
 }
 
 // Trash moves a session's files to ~/.muxlair/trash/<agent>/<ts>-<id>/.
@@ -122,9 +125,15 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
+	// out was created here (O_EXCL), so a failed copy may remove it.
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
+		os.Remove(dst)
 		return err
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		os.Remove(dst)
+		return err
+	}
+	return nil
 }

@@ -21,6 +21,9 @@ const usage = `muxlair: a terminal dashboard for local Claude Code and Codex ses
 Usage:
   muxlair             start the dashboard (run it inside tmux or cmux)
   muxlair --list      print sessions as an aligned table and exit (debug)
+  muxlair trash       list sessions in ~/.muxlair/trash
+  muxlair restore <agent> <id>
+                      put a trashed session back (agent: claude or codex)
   muxlair --version   print the version and exit
   muxlair --help      show this help
 
@@ -49,6 +52,24 @@ func main() {
 			fmt.Println("muxlair", buildVersion())
 			return
 		case "--list":
+		case "trash":
+			listTrash()
+			return
+		case "restore":
+			if len(os.Args) != 4 {
+				fmt.Fprint(os.Stderr, "usage: muxlair restore <claude|codex> <session id>\n")
+				os.Exit(2)
+			}
+			notes, err := agents.Restore(os.Args[2], os.Args[3])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "muxlair: restore:", err)
+				os.Exit(1)
+			}
+			fmt.Printf("restored %s %s; it shows up in muxlair within a few seconds\n", os.Args[2], os.Args[3])
+			for _, n := range notes {
+				fmt.Println("note:", n)
+			}
+			return
 		default:
 			fmt.Fprintf(os.Stderr, "muxlair: unknown argument %q\n\n%s", os.Args[1], usage)
 			os.Exit(2)
@@ -81,4 +102,21 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func listTrash() {
+	es, err := agents.ListTrash()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err) // partial results still listed below
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "AGENT\tID\tDELETED\tRESTORED\tNAME")
+	for _, e := range es {
+		restored := "-"
+		if e.Restored() {
+			restored = e.Meta.RestoredAt.Format("2006-01-02 15:04")
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Format("2006-01-02 15:04"), restored, e.Meta.Name)
+	}
+	w.Flush()
 }
