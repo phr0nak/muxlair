@@ -22,6 +22,19 @@ type TrashEntry struct {
 
 func (e TrashEntry) Restored() bool { return e.Meta.RestoredAt != nil }
 
+// Restorable: a Codex session deleted while its session file was already gone
+// (it showed as dead) has only database rows saved, which can't be put back.
+// Files listed in meta.json must also be there: a failed delete can leave a
+// partial entry.
+func (e TrashEntry) Restorable() bool {
+	for name := range e.Meta.Files {
+		if _, err := os.Lstat(filepath.Join(e.Dir, name)); err != nil {
+			return false
+		}
+	}
+	return len(e.Meta.Files) > 0
+}
+
 // ListTrash returns the trash entries, newest first. An entry whose meta.json
 // can't be read is skipped and reported in the error.
 func ListTrash() ([]TrashEntry, error) {
@@ -170,7 +183,7 @@ func restoreCodex(e TrashEntry) ([]string, error) {
 		items = append(items, item{filepath.Join(e.Dir, name), dst, e.Meta.ID})
 	}
 	if len(items) == 0 {
-		return nil, errors.New("this entry has no session file: Codex kept the history only in its database, which muxlair can't write back")
+		return nil, errors.New("this entry has no session file: it was already gone when the session was deleted (it showed as dead), so Codex couldn't reopen it then either. Only its readable history (history.jsonl) was saved")
 	}
 	helpers, _ := filepath.Glob(filepath.Join(e.Dir, "helper-rollout-*.jsonl"))
 	for _, h := range helpers {

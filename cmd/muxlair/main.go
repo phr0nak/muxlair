@@ -110,13 +110,17 @@ func listTrash() {
 		fmt.Fprintln(os.Stderr, err) // partial results still listed below
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "AGENT\tID\tDELETED\tRESTORED\tNAME")
+	fmt.Fprintln(w, "AGENT\tID\tDELETED\tRESTORABLE\tRESTORED\tNAME")
 	for _, e := range es {
 		restored := "-"
 		if e.Restored() {
 			restored = e.Meta.RestoredAt.Format("2006-01-02 15:04")
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Format("2006-01-02 15:04"), restored, e.Meta.Name)
+		restorable := "yes"
+		if !e.Restorable() {
+			restorable = "no"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Format("2006-01-02 15:04"), restorable, restored, e.Meta.Name)
 	}
 	w.Flush()
 }

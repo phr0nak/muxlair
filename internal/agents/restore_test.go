@@ -251,3 +251,14 @@ func TestMoveNoReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRestorable(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "0-a"), []byte("x"), 0o600)
+	full := TrashEntry{dir, trashMeta{Files: map[string]string{"0-a": "/o/a"}}}
+	partial := TrashEntry{dir, trashMeta{Files: map[string]string{"0-a": "/o/a", "1-b": "/o/b"}}} // 1-b never arrived
+	none := TrashEntry{dir, trashMeta{}}                                                          // dead codex session: rows only
+	if !full.Restorable() || partial.Restorable() || none.Restorable() {
+		t.Fatalf("full=%v partial=%v none=%v", full.Restorable(), partial.Restorable(), none.Restorable())
+	}
+}

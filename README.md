@@ -176,7 +176,7 @@ The session reappears in `muxlair` within a few seconds, and `muxlair` never aut
 - **Codex limits:**
   - Codex keeps some sessions' turns in its own history database, not in the session file. If a restored conversation looks incomplete, only an older copy was in the file; the full backup is still in the trash entry.
   - Details Codex stores only in its database, such as token counts, may not come back.
-  - A trash entry with no session file can't be restored.
+  - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column.
 
 ## Configuration
 
