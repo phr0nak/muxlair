@@ -120,14 +120,14 @@ func TestRenameClaudeTranscript(t *testing.T) {
 
 func TestAwaitRPC(t *testing.T) {
 	ok := "{\"method\":\"note\"}\n{\"id\":1,\"result\":{}}\n{\"id\":2,\"result\":{}}\n"
-	if err := awaitRPC(strings.NewReader(ok), 2); err != nil {
+	if err := awaitRPC(rpcScanner(strings.NewReader(ok)), 2); err != nil {
 		t.Fatal(err)
 	}
 	bad := "{\"id\":2,\"error\":{\"message\":\"thread not found\"}}\n"
-	if err := awaitRPC(strings.NewReader(bad), 2); err == nil || !strings.Contains(err.Error(), "thread not found") {
+	if err := awaitRPC(rpcScanner(strings.NewReader(bad)), 2); err == nil || !strings.Contains(err.Error(), "thread not found") {
 		t.Fatalf("got %v", err)
 	}
-	if err := awaitRPC(strings.NewReader(""), 2); err == nil {
+	if err := awaitRPC(rpcScanner(strings.NewReader("")), 2); err == nil {
 		t.Fatal("no error on EOF")
 	}
 }
