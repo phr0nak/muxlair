@@ -238,7 +238,7 @@ func restoreCodex(e TrashEntry) ([]string, error) {
 			return errors.New("Codex did not register the restored session")
 		}
 		var rest []rpcCall
-		name, mode := historyInfo(e.Dir)
+		name, turns := historyInfo(e.Dir)
 		if name != "" { // the name lives in Codex's database, not the rollout
 			rest = append(rest, rpcCall{"thread/name/set", map[string]string{"threadId": e.Meta.ID, "name": name}})
 		}
@@ -250,8 +250,10 @@ func restoreCodex(e TrashEntry) ([]string, error) {
 				notes = append(notes, "restored the session, but not all of its name and helper sessions: "+err.Error())
 			}
 		}
-		if mode == "paginated" {
-			notes = append(notes, "Codex keeps this session's turns in its own history database. If the conversation looks incomplete when reopened, only an older copy was in the rollout file; the full backup is in the trash entry.")
+		// Codex keeps the turns of newer sessions in its history database too. Warn
+		// if some finished turns recorded there are not in the rollout we put back.
+		if miss := missingTurns(items[0].dst, turns); miss > 0 {
+			notes = append(notes, fmt.Sprintf("%d of %d finished turns in Codex's history database are not in the session file, so the restored conversation may be missing them. The full history is in %s.", miss, len(turns), filepath.Join(e.Dir, "history.jsonl")))
 		}
 		now := time.Now()
 		e.Meta.RestoredAt = &now
@@ -263,30 +265,71 @@ func restoreCodex(e TrashEntry) ([]string, error) {
 	return notes, err
 }
 
-// historyInfo reads the thread's name and history mode from the history.jsonl
-// that Trash exported: it holds the row of Codex's threads table.
-func historyInfo(dir string) (name, mode string) {
+// historyInfo reads the thread's name and the ids of its finished turns from
+// the history.jsonl that Trash exported: it holds the rows of Codex's threads
+// and thread_turns tables.
+func historyInfo(dir string) (name string, turns []string) {
 	f, err := os.Open(filepath.Join(dir, "history.jsonl"))
 	if err != nil {
-		return "", ""
+		return "", nil
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 64<<20)
 	for sc.Scan() {
-		if !bytes.Contains(sc.Bytes(), []byte(`"table":"threads"`)) {
+		line := sc.Bytes()
+		if !bytes.Contains(line, []byte(`"table":"threads"`)) && !bytes.Contains(line, []byte(`"table":"thread_turns"`)) {
 			continue
 		}
 		var r struct {
 			Table string `json:"table"`
 			Row   struct {
-				Name string `json:"name"`
-				Mode string `json:"history_mode"`
+				Name   string `json:"name"`
+				Status string `json:"status"`
+				TurnID string `json:"turn_id"`
 			} `json:"row"`
 		}
-		if json.Unmarshal(sc.Bytes(), &r) == nil && r.Table == "threads" {
-			return r.Row.Name, r.Row.Mode
+		if json.Unmarshal(line, &r) != nil {
+			continue
+		}
+		switch {
+		case r.Table == "threads":
+			name = r.Row.Name
+		case r.Table == "thread_turns" && r.Row.Status == "completed" && r.Row.TurnID != "":
+			turns = append(turns, r.Row.TurnID)
 		}
 	}
-	return "", ""
+	return name, turns
+}
+
+// missingTurns counts the turn ids whose completion the rollout does not record.
+// shortcut: only completed turns are checked, not failed or interrupted ones, and a
+// rollout with a turn's completion but not all its messages goes unnoticed; upgrade
+// to comparing the saved items if an incomplete restore shows up.
+func missingTurns(path string, ids []string) int {
+	if len(ids) == 0 {
+		return 0
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return len(ids)
+	}
+	defer f.Close()
+	left := map[string]bool{}
+	for _, id := range ids {
+		left[id] = true
+	}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 64<<20)
+	for sc.Scan() && len(left) > 0 {
+		if !bytes.Contains(sc.Bytes(), []byte(`"type":"task_complete"`)) {
+			continue // a turn only counts once its completion is recorded
+		}
+		for id := range left {
+			if bytes.Contains(sc.Bytes(), []byte(id)) {
+				delete(left, id)
+			}
+		}
+	}
+	return len(left)
 }

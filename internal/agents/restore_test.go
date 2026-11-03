@@ -105,13 +105,38 @@ func TestHelperTarget(t *testing.T) {
 func TestHistoryInfo(t *testing.T) {
 	dir := t.TempDir()
 	rows := `{"db":"state_5.sqlite","table":"thread_spawn_edges","row":{"name":"no"}}` + "\n" +
-		`{"db":"state_5.sqlite","table":"threads","row":{"name":"My thread","history_mode":"paginated"}}` + "\n"
+		`{"db":"state_5.sqlite","table":"threads","row":{"name":"My thread"}}` + "\n" +
+		`{"db":"thread_history_1.sqlite","table":"thread_turns","row":{"status":"inProgress","turn_id":"stale"}}` + "\n" + // a stale turn doesn't count
+		`{"db":"thread_history_1.sqlite","table":"thread_turns","row":{"status":"completed","turn_id":"t1"}}` + "\n" +
+		`{"db":"thread_history_1.sqlite","table":"thread_turns","row":{"status":"completed","turn_id":"t2"}}` + "\n"
 	os.WriteFile(filepath.Join(dir, "history.jsonl"), []byte(rows), 0o600)
-	if n, m := historyInfo(dir); n != "My thread" || m != "paginated" {
-		t.Fatalf("got %q %q", n, m)
+	if n, ids := historyInfo(dir); n != "My thread" || strings.Join(ids, ",") != "t1,t2" {
+		t.Fatalf("got %q %v", n, ids)
 	}
-	if n, m := historyInfo(t.TempDir()); n != "" || m != "" {
+	if n, ids := historyInfo(t.TempDir()); n != "" || ids != nil {
 		t.Fatal("missing file should give nothing")
+	}
+}
+
+// Equal counts are not enough: the rollout must hold the same turns.
+func TestMissingTurns(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "r.jsonl")
+	os.WriteFile(f, []byte(`{"payload":{"type":"task_started","turn_id":"t2"}}`+"\n"+`{"payload":{"type":"task_complete","turn_id":"t3"}}`+"\n"+
+		`{"payload":{"type":"task_started","turn_id":"t4"}}`+"\n"), 0o600) // t2, t4: started, never completed
+	if n := missingTurns(f, []string{"t3"}); n != 0 {
+		t.Fatalf("completed turn reported missing: %d", n)
+	}
+	if n := missingTurns(f, []string{"t2", "t3", "t4"}); n != 2 {
+		t.Fatalf("started-only turns must count as missing, got %d", n)
+	}
+	if n := missingTurns(f, []string{"t1", "t3"}); n != 1 { // a different turn than the rollout's
+		t.Fatalf("got %d missing, want 1", n)
+	}
+	if n := missingTurns(filepath.Join(t.TempDir(), "none"), []string{"t1"}); n != 1 {
+		t.Fatal("a missing file has every turn missing")
+	}
+	if n := missingTurns(f, nil); n != 0 {
+		t.Fatal("nothing to find")
 	}
 }
 

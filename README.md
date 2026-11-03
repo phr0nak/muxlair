@@ -174,7 +174,7 @@ The session reappears in `muxlair` within a few seconds, and `muxlair` never aut
 - **Codex:** the session file is copied back, and then Codex itself picks it up (`muxlair` never writes Codex's database). The name is set again, and any helper sessions come back with it. The entry stays in the trash, marked as restored, because it holds the full backup.
 - **Nothing is overwritten.** If a file is already at the original location, for example because a new session took the same ID, the restore stops and changes nothing.
 - **Codex limits:**
-  - Codex keeps some sessions' turns in its own history database, not in the session file. If a restored conversation looks incomplete, only an older copy was in the file; the full backup is still in the trash entry.
+  - Codex also keeps the turns of newer sessions in its own history database, which `muxlair` can't write back. `muxlair restore` checks that every completed turn in the saved history is in the session file, and prints a warning if some are missing. The check is a heuristic: it doesn't look at failed or interrupted turns, or at each message. The full history stays in the trash entry (`history.jsonl`).
   - Details Codex stores only in its database, such as token counts, may not come back.
   - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column.
 
