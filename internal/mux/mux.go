@@ -126,18 +126,26 @@ func output(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// SendLine types text into an agent's prompt and presses Enter. It refuses unless
-// the prompt is empty, so a half-written draft is never submitted: cmux checks that
-// itself; for tmux muxlair reads the pane and looks for Claude's empty prompt.
-func SendLine(t Target, text string) error {
-	if t.Mux == "tmux" {
-		screen, err := output("tmux", "capture-pane", "-p", "-t", t.Pane)
+// SendLine types text into an agent's prompt ("claude" or "codex") and presses
+// Enter. It refuses unless the prompt is empty, so a half-written draft is never
+// submitted. cmux guards Claude's prompt itself, but not Codex's (typing over a
+// Codex draft just appends to it), and tmux guards nothing: for those muxlair
+// reads the screen and looks for the agent's empty prompt.
+func SendLine(t Target, agent, text string) error {
+	if t.Mux == "tmux" || agent == "codex" {
+		screen, err := screenOf(t)
 		if err != nil {
 			return err
 		}
-		if !promptEmpty(screen) {
-			return fmt.Errorf("its prompt is not empty (or not visible); clear it and retry, or type /rename there")
+		empty := promptEmpty
+		if agent == "codex" {
+			empty = codexPromptEmpty
 		}
+		if !empty(screen) {
+			return fmt.Errorf("its prompt is not empty (or not visible); clear it and retry, or type %s there", text)
+		}
+	}
+	if t.Mux == "tmux" {
 		if err := run("tmux", "send-keys", "-t", t.Pane, "-l", text); err != nil {
 			return err
 		}
@@ -148,6 +156,30 @@ func SendLine(t Target, text string) error {
 		return err
 	}
 	return run(cmuxBin(), append(append([]string{"send-key"}, ctx...), "enter")...)
+}
+
+// screenOf returns the visible text of the terminal.
+func screenOf(t Target) (string, error) {
+	if t.Mux == "tmux" {
+		return output("tmux", "capture-pane", "-p", "-t", t.Pane)
+	}
+	return output(cmuxBin(), "read-screen", "--surface", t.Pane, "--workspace", t.Workspace, "--window", t.Window)
+}
+
+// codexPlaceholder is what Codex's empty input box shows (as of 0.166).
+const codexPlaceholder = "Ask Codex to do anything"
+
+// codexPromptEmpty reports whether Codex's input box, the bottom-most "›" line
+// (earlier ones echo past messages), shows only its placeholder. Anything else,
+// including no box on screen or a different placeholder, counts as not empty.
+func codexPromptEmpty(screen string) bool {
+	lines := strings.Split(screen, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); strings.HasPrefix(l, "›") {
+			return strings.TrimSpace(strings.TrimPrefix(l, "›")) == codexPlaceholder
+		}
+	}
+	return false
 }
 
 // promptEmpty reports whether the screen shows Claude's input prompt with nothing

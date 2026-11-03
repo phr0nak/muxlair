@@ -52,7 +52,7 @@ type tickMsg struct{}
 type fsMsg struct{}
 type statusMsg string
 type deletedMsg string
-type renamedMsg struct{ key, name, err string }
+type renamedMsg struct{ key, name, err, note string }
 type autoDeletedMsg struct {
 	deleted []string // "<agent> <session id>"
 	failed  []string // keys; not retried this run
@@ -400,6 +400,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status = "renamed to " + msg.name
+		if msg.note != "" {
+			m.status += "; " + msg.note
+		}
 		return m, m.reload()
 	case deletedMsg:
 		m.status = "moved to " + string(msg)
@@ -1042,11 +1045,12 @@ func renameCmd(s agents.Session, name string) tea.Cmd {
 	return func() tea.Msg {
 		s, err := fresh(s)
 		if err != nil {
-			return renamedMsg{k, name, err.Error()}
+			return renamedMsg{key: k, name: name, err: err.Error()}
 		}
+		note := ""
 		switch {
 		case s.Agent == "codex":
-			err = agents.RenameCodex(s.ID, name)
+			note, err = renameCodex(s, name)
 		case s.Agent == "claude" && s.PID == 0:
 			err = agents.RenameClaudeTranscript(s, name)
 		case s.Agent == "claude":
@@ -1057,16 +1061,41 @@ func renameCmd(s agents.Session, name string) tea.Cmd {
 			case s.Status == agents.Busy:
 				err = fmt.Errorf("claude is busy; rename it once it is idle")
 			default:
-				err = mux.SendLine(t, "/rename "+name)
+				err = mux.SendLine(t, "claude", "/rename "+name)
 			}
 		default:
 			err = fmt.Errorf("renaming %s sessions is not supported", s.Agent)
 		}
 		if err != nil {
-			return renamedMsg{k, name, err.Error()}
+			return renamedMsg{key: k, name: name, err: err.Error()}
 		}
-		return renamedMsg{k, name, ""}
+		return renamedMsg{key: k, name: name, note: note}
 	}
+}
+
+// renameCodex renames a Codex session. A running one keeps its name in memory
+// and only learns a new one in its own terminal, so type /rename there when
+// that is safe (the session then saves the name itself). Otherwise the name is
+// set through the app server, and the open session shows it after a reopen.
+func renameCodex(s agents.Session, name string) (note string, err error) {
+	if s.PID != 0 {
+		var why string
+		t, ok := mux.Targets()[s.TTY]
+		switch {
+		case !ok || s.TTY == "":
+			why = "its terminal isn't a tmux pane or cmux tab muxlair can reach"
+		case s.Status == agents.Busy:
+			why = "it is busy"
+		default:
+			if err := mux.SendLine(t, "codex", "/rename "+name); err == nil {
+				return "", nil
+			} else {
+				why = err.Error()
+			}
+		}
+		note = "the open Codex keeps the old name until you run /rename there or reopen it: " + why
+	}
+	return note, agents.RenameCodex(s.ID, name)
 }
 
 // tabName shortens a session name for a tmux window or cmux tab title.

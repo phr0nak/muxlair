@@ -219,7 +219,7 @@ EOF
 
 `muxlair` reads each agent's own session files: `~/.claude` for Claude Code, and `~/.codex` (or `$CODEX_HOME`) for Codex. It changes them in only four cases:
 
-- **Rename:** Codex sessions are renamed through Codex itself. For a closed Claude session, `muxlair` adds the same rename record `/rename` would. For a running Claude session, `muxlair` types `/rename <name>` into it, but only while its prompt is empty, so nothing you're typing gets sent. In `tmux`, `muxlair` checks the screen for that; `cmux` refuses on its own to type into a prompt that already holds text.
+- **Rename:** a closed Claude session gets the same rename record `/rename` would write, and a closed Codex session is renamed through Codex's own app server. A running Claude or Codex session gets `/rename <name>` typed into its terminal, but only while it is idle and its input box is empty, so nothing you're typing gets sent. `muxlair` checks the screen for that. If it can't type (the terminal isn't a `tmux` pane or `cmux` tab it can reach, the session is busy, or you have a draft), a Codex session is still renamed through the app server, and `muxlair` says that the open session keeps its old name until you run `/rename` there or reopen it. A running Claude session is not renamed in that case.
 - **Delete:** when you press `d`, the session goes to the trash, as described above.
 - **Automatic cleanup:** finished non-interactive runs go to the trash, as described in [Automatic cleanup](#automatic-cleanup).
 - **Restore:** `muxlair restore` puts a trashed session back, as described in [Restoring](#restoring-a-session).

@@ -62,7 +62,7 @@ func TestTmuxSendLine(t *testing.T) {
 	t.Setenv("TMUX", sock+",0,0")
 	time.Sleep(200 * time.Millisecond) // let the fake prompt draw
 	pane, _ := exec.Command("tmux", "display", "-p", "-t", "it", "#{pane_id}").Output()
-	if err := SendLine(Target{Mux: "tmux", Pane: strings.TrimSpace(string(pane))}, "/rename hello world"); err != nil {
+	if err := SendLine(Target{Mux: "tmux", Pane: strings.TrimSpace(string(pane))}, "claude", "/rename hello world"); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(200 * time.Millisecond)
@@ -70,5 +70,35 @@ func TestTmuxSendLine(t *testing.T) {
 	// cat echoes the typed line, then prints it again after Enter.
 	if strings.Count(string(out), "/rename hello world") != 2 {
 		t.Fatalf("pane:\n%s", out)
+	}
+}
+
+// Codex's empty prompt gets the line; a draft in its prompt is left alone.
+func TestTmuxSendLineCodex(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("no tmux")
+	}
+	sock := t.TempDir() + "/sock"
+	t.Setenv("TMUX", sock+",0,0")
+	defer exec.Command("tmux", "-S", sock, "kill-server").Run()
+	try := func(name, screen string) (string, error) {
+		fake := "printf '" + screen + "'; cat"
+		if out, err := exec.Command("tmux", "-S", sock, "new-session", "-d", "-s", name, fake).CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+		time.Sleep(200 * time.Millisecond)
+		pane, _ := exec.Command("tmux", "display", "-p", "-t", name, "#{pane_id}").Output()
+		err := SendLine(Target{Mux: "tmux", Pane: strings.TrimSpace(string(pane))}, "codex", "/rename hello")
+		time.Sleep(200 * time.Millisecond)
+		out, _ := exec.Command("tmux", "capture-pane", "-p", "-t", name).Output()
+		return string(out), err
+	}
+	out, err := try("empty", "› earlier message\n\n› Ask Codex to do anything\n  status\n")
+	if err != nil || strings.Count(out, "/rename hello") != 2 {
+		t.Fatalf("empty prompt: %v\n%s", err, out)
+	}
+	out, err = try("draft", "› Ask Codex to do anything\n\n› half-written draft\n  status\n")
+	if err == nil || strings.Contains(out, "/rename hello") {
+		t.Fatalf("typed over a draft: %v\n%s", err, out)
 	}
 }

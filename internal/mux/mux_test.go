@@ -86,3 +86,19 @@ func TestCmuxRenameWorkspaceOnlyWhenAlone(t *testing.T) {
 		t.Fatalf("shared workspace must only get the tab renamed: %q", got)
 	}
 }
+
+func TestCodexPromptEmpty(t *testing.T) {
+	for screen, want := range map[string]bool{
+		"out\n› Ask Codex to do anything\n\n  gpt · ~/p\n  ? for shortcuts":     true,
+		"› earlier message\n• ok\n› Ask Codex to do anything\n  status":         true, // an echoed message above the box
+		"out\n› half-written draft\n  status":                                   false,
+		"› Ask Codex to do anything\n• reply\n› typed after an old placeholder": false, // the bottom-most one is the box
+		"no prompt here\n$ ":               false,
+		"› 1. gpt-5 (current)\n  2. other": false, // a picker, not the box
+		"› Ask a follow-up question":       false, // another placeholder: not ours to guess
+	} {
+		if got := codexPromptEmpty(screen); got != want {
+			t.Errorf("%q: got %v", screen, got)
+		}
+	}
+}

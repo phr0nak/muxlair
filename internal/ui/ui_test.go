@@ -682,3 +682,18 @@ func TestResizeReadout(t *testing.T) {
 		t.Fatal("readout didn't go away")
 	}
 }
+
+// A rename that could not reach the open Codex still succeeded in the database:
+// the bar says so, with the reason.
+func TestRenamedNoteShownInStatus(t *testing.T) {
+	m := New(Options{}, "")
+	nm, _ := m.Update(renamedMsg{key: "codex:x", name: "New", note: "the open Codex keeps the old name: it is busy"})
+	st := nm.(Model).status
+	if !strings.Contains(st, "renamed to New") || !strings.Contains(st, "it is busy") {
+		t.Fatalf("status %q", st)
+	}
+	nm, _ = m.Update(renamedMsg{key: "codex:x", name: "New"})
+	if st := nm.(Model).status; st != "renamed to New" {
+		t.Fatalf("status %q", st)
+	}
+}
