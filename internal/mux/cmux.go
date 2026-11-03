@@ -51,9 +51,13 @@ func parseCmuxTree(b []byte) map[string]Target {
 	m := map[string]Target{}
 	for _, w := range tree.Windows {
 		for _, ws := range w.Workspaces {
-			n := 0
+			n := 0 // terminals only: a browser tab beside the session doesn't make the workspace shared
 			for _, p := range ws.Panes {
-				n += len(p.Surfaces)
+				for _, s := range p.Surfaces {
+					if s.Type == "terminal" {
+						n++
+					}
+				}
 			}
 			for _, p := range ws.Panes {
 				for _, s := range p.Surfaces {
@@ -78,8 +82,16 @@ func cmuxFocus(t Target) error {
 	return run(cmuxBin(), "focus-panel", "--panel", t.Pane, "--workspace", t.Workspace, "--window", t.Window)
 }
 
-// cmuxRename renames the tab only; workspace names may be user-chosen, so leave them.
+// cmuxRename renames the tab, and the workspace too when the session is alone in
+// it (tmuxRename's rule). A workspace shared with other terminals may carry a
+// name the user chose, so it is left alone.
 func cmuxRename(t Target, name string) error {
-	return run(cmuxBin(), "tab-action", "--action", "rename", "--tab", t.Pane,
-		"--workspace", t.Workspace, "--window", t.Window, "--title", name)
+	if err := run(cmuxBin(), "tab-action", "--action", "rename", "--tab", t.Pane,
+		"--workspace", t.Workspace, "--window", t.Window, "--title", name); err != nil {
+		return err
+	}
+	if !t.Solo {
+		return nil
+	}
+	return run(cmuxBin(), "rename-workspace", "--workspace", t.Workspace, "--window", t.Window, "--", name)
 }
