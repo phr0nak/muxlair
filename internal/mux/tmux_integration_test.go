@@ -102,3 +102,24 @@ func TestTmuxSendLineCodex(t *testing.T) {
 		t.Fatalf("typed over a draft: %v\n%s", err, out)
 	}
 }
+
+// An agent that never takes the line (its prompt still shows our text) is reported.
+func TestTmuxSendLineReportsUntakenLine(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("no tmux")
+	}
+	sock := t.TempDir() + "/sock"
+	t.Setenv("TMUX", sock+",0,0")
+	defer exec.Command("tmux", "-S", sock, "kill-server").Run()
+	// Redraws the prompt with the typed line in it, as if Enter had added a newline.
+	fake := `printf '› Ask Codex to do anything\n'; while read x; do printf '\033[2J\033[H› %s\n' "$x"; done`
+	if out, err := exec.Command("tmux", "-S", sock, "new-session", "-d", "-s", "stuck", fake).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	time.Sleep(200 * time.Millisecond)
+	pane, _ := exec.Command("tmux", "display", "-p", "-t", "stuck", "#{pane_id}").Output()
+	err := SendLine(Target{Mux: "tmux", Pane: strings.TrimSpace(string(pane))}, "codex", "/rename hello")
+	if err == nil || !strings.Contains(err.Error(), "did not clear") {
+		t.Fatalf("got %v", err)
+	}
+}

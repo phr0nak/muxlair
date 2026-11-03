@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Target is a terminal (tmux pane or cmux surface) hosting a session.
@@ -126,36 +127,56 @@ func output(name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// enterDelay separates the typed text from Enter. Agents treat fast typing as a
+// paste, and Enter right after a paste adds a newline instead of submitting
+// (Codex does, with no pause at all; 50ms was enough in testing).
+const enterDelay = 200 * time.Millisecond
+
 // SendLine types text into an agent's prompt ("claude" or "codex") and presses
 // Enter. It refuses unless the prompt is empty, so a half-written draft is never
 // submitted. cmux guards Claude's prompt itself, but not Codex's (typing over a
 // Codex draft just appends to it), and tmux guards nothing: for those muxlair
-// reads the screen and looks for the agent's empty prompt.
+// reads the screen and looks for the agent's empty prompt. Where it can read the
+// screen it also checks that the prompt is empty again afterwards, so a line the
+// agent did not take is reported.
 func SendLine(t Target, agent, text string) error {
-	if t.Mux == "tmux" || agent == "codex" {
+	empty := promptEmpty
+	if agent == "codex" {
+		empty = codexPromptEmpty
+	}
+	readable := t.Mux == "tmux" || agent == "codex"
+	if readable {
 		screen, err := screenOf(t)
 		if err != nil {
 			return err
-		}
-		empty := promptEmpty
-		if agent == "codex" {
-			empty = codexPromptEmpty
 		}
 		if !empty(screen) {
 			return fmt.Errorf("its prompt is not empty (or not visible); clear it and retry, or type %s there", text)
 		}
 	}
+	var err error
 	if t.Mux == "tmux" {
-		if err := run("tmux", "send-keys", "-t", t.Pane, "-l", text); err != nil {
-			return err
+		if err = run("tmux", "send-keys", "-t", t.Pane, "-l", text); err == nil {
+			time.Sleep(enterDelay)
+			err = run("tmux", "send-keys", "-t", t.Pane, "Enter")
 		}
-		return run("tmux", "send-keys", "-t", t.Pane, "Enter")
+	} else {
+		ctx := []string{"--surface", t.Pane, "--workspace", t.Workspace, "--window", t.Window}
+		if err = run(cmuxBin(), append(append([]string{"send"}, ctx...), "--", text)...); err == nil {
+			time.Sleep(enterDelay)
+			err = run(cmuxBin(), append(append([]string{"send-key"}, ctx...), "enter")...)
+		}
 	}
-	ctx := []string{"--surface", t.Pane, "--workspace", t.Workspace, "--window", t.Window}
-	if err := run(cmuxBin(), append(append([]string{"send"}, ctx...), "--", text)...); err != nil {
+	if err != nil || !readable {
 		return err
 	}
-	return run(cmuxBin(), append(append([]string{"send-key"}, ctx...), "enter")...)
+	for i := 0; i < 10; i++ { // up to ~2s for the agent to take the line
+		time.Sleep(200 * time.Millisecond)
+		if screen, err := screenOf(t); err == nil && empty(screen) {
+			return nil
+		}
+	}
+	return fmt.Errorf("typed %s but its prompt did not clear; check the agent's prompt", text)
 }
 
 // screenOf returns the visible text of the terminal.
