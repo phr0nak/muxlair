@@ -287,3 +287,36 @@ func TestRestorable(t *testing.T) {
 		t.Fatalf("full=%v partial=%v none=%v", full.Restorable(), partial.Restorable(), none.Restorable())
 	}
 }
+
+// RestoreEntry restores the entry it is given, not the newest one for the session.
+func TestRestoreEntryPicksTheGivenEntry(t *testing.T) {
+	Home = t.TempDir()
+	dst := filepath.Join(Home, ".claude", "projects", "-p", "abc.jsonl")
+	put := func(stamp, body string, at time.Time) {
+		dir := filepath.Join(TrashDir(), "claude", stamp+"-abc")
+		os.MkdirAll(dir, 0o700)
+		os.WriteFile(filepath.Join(dir, "0-abc.jsonl"), []byte(body), 0o600)
+		writeMeta(dir, trashMeta{Agent: "claude", ID: "abc", DeletedAt: at, Files: map[string]string{"0-abc.jsonl": dst}})
+	}
+	put("20261101-100000", "old", time.Now().Add(-48*time.Hour))
+	put("20261103-100000", "new", time.Now())
+	es, err := ListTrash()
+	if err != nil || len(es) != 2 || es[1].Meta.DeletedAt.After(es[0].Meta.DeletedAt) {
+		t.Fatalf("list: %v %+v", err, es)
+	}
+	if _, err := RestoreEntry(es[1]); err != nil { // the older one
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "old" {
+		t.Fatalf("restored %q, want the selected (older) entry's file", b)
+	}
+	if left, _ := ListTrash(); len(left) != 1 || left[0].Meta.DeletedAt.Before(es[0].Meta.DeletedAt) {
+		t.Fatalf("the newer entry should remain in the trash: %+v", left)
+	}
+	done := es[1]
+	now := time.Now()
+	done.Meta.RestoredAt = &now
+	if _, err := RestoreEntry(done); err == nil || !strings.Contains(err.Error(), "already restored") {
+		t.Fatalf("restoring a restored entry: %v", err)
+	}
+}
