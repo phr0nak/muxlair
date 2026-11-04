@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Libraries that can change how the UI or the session storage behaves: these
+      # are tried locally before they are merged.
+      ui-and-storage:
+        patterns:
+          - "github.com/charmbracelet/*"
+          - "modernc.org/*"
+        update-types: ["minor", "patch"]
+      # Everything else: merged after CI and a review.
+      routine:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    # Major versions are not in a group, so each arrives as its own PR.
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
