@@ -486,3 +486,39 @@ func TestClaudeDerivedNameNotShown(t *testing.T) {
 		t.Errorf("renamed: got %q", got["renamed"])
 	}
 }
+
+// A Codex thread with no name, title or first message shows (unnamed), like a Claude one.
+func TestCodexUnnamed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	db, err := sql.Open("sqlite", filepath.Join(home, "state_5.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`CREATE TABLE threads (id TEXT, rollout_path TEXT, cwd TEXT, name TEXT, title TEXT, first_user_message TEXT, updated_at_ms INT, history_mode TEXT, source TEXT, archived INT)`,
+		`INSERT INTO threads VALUES
+			('aaaaaaaa-1', '', '/w', '', '', '', 1000, '', 'cli', 0),
+			('bbbbbbbb-2', '', '/w', '', '', 'fix the bug', 1000, '', 'cli', 0),
+			('cccccccc-3', '', '/w', 'my name', '', 'fix the bug', 1000, '', 'cli', 0)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	ss, err := listCodex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, s := range ss {
+		got[s.ID] = s.Name
+	}
+	want := map[string]string{"aaaaaaaa-1": Unnamed, "bbbbbbbb-2": "fix the bug", "cccccccc-3": "my name"}
+	for id, n := range want {
+		if got[id] != n {
+			t.Errorf("%s: got %q, want %q", id, got[id], n)
+		}
+	}
+}
