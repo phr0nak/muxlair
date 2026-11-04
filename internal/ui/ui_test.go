@@ -741,7 +741,7 @@ func TestTrashPopupRestoresAndExplains(t *testing.T) {
 		t.Fatalf("popup not open with 2 entries: %+v", m.trash)
 	}
 	v := m.View()
-	for _, want := range []string{"Trash", "Fix the bug", "Dead one", "enter/u restore"} {
+	for _, want := range []string{"Trash", "RESTORABLE", "RESTORED", "Fix the bug", "Dead one", "enter/u restore"} {
 		if !strings.Contains(ansi.Strip(v), want) {
 			t.Fatalf("view lacks %q:\n%s", want, ansi.Strip(v))
 		}
@@ -865,8 +865,97 @@ func TestTrashPopupFitsNarrowWindow(t *testing.T) {
 				t.Fatalf("width %d: line %d is %d cells wide:\n%s", width, i, w, ansi.Strip(line))
 			}
 		}
-		if !strings.Contains(ansi.Strip(m.View()), "A fairly") {
+		if !strings.Contains(ansi.Strip(m.View()), "A fa") { // at 44 columns only the start of the name fits
 			t.Fatalf("width %d: the name is not visible:\n%s", width, ansi.Strip(m.View()))
 		}
+	}
+}
+
+// The columns are the ones `muxlair trash` prints, in the same order, and each
+// value sits right under its header. Long names are cut, and an empty one says so.
+func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
+	agents.Home = t.TempDir()
+	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
+	now := time.Now()
+	long := strings.Repeat("very long name ", 8)
+	putTrash(t, "claude", "aaaaaaaa-1", long, now, map[string]string{"0-a.jsonl": filepath.Join(proj, "a.jsonl")})
+	putTrash(t, "claude", "bbbbbbbb-2", "", now.Add(-time.Hour), map[string]string{"0-b.jsonl": filepath.Join(proj, "b.jsonl")})
+	putTrash(t, "codex", "cccccccc-3", "Dead one", now.Add(-2*time.Hour), nil)
+	// An entry that was restored: its meta.json carries restoredAt.
+	dir := putTrash(t, "claude", "dddddddd-4", "Was restored", now.Add(-3*time.Hour), map[string]string{"0-d.jsonl": filepath.Join(proj, "d.jsonl")})
+	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
+	var meta map[string]any
+	json.Unmarshal(b, &meta)
+	meta["restoredAt"] = now
+	b, _ = json.Marshal(meta)
+	os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o600)
+
+	m := New(Options{}, "")
+	m.height, m.width = 30, 140
+	m, _ = press(m, "t")
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	find := func(sub string) (string, bool) {
+		for _, l := range lines {
+			if strings.Contains(l, sub) {
+				return l, true
+			}
+		}
+		return "", false
+	}
+	col := func(line, token string) int { // display column of the token
+		i := strings.Index(line, token)
+		if i < 0 {
+			return -1
+		}
+		return ansi.StringWidth(line[:i])
+	}
+	head, ok := find("RESTORABLE")
+	if !ok {
+		t.Fatalf("no header:\n%s", strings.Join(lines, "\n"))
+	}
+	last := -1
+	for _, h := range []string{"AGENT", "ID", "DELETED", "RESTORABLE", "RESTORED", "NAME"} {
+		c := col(head, h)
+		if c <= last {
+			t.Fatalf("header column %s is out of order: %q", h, head)
+		}
+		last = c
+	}
+	for _, id := range []string{"aaaaaaaa", "bbbbbbbb", "cccccccc", "dddddddd"} {
+		row, ok := find(id)
+		if !ok {
+			t.Fatalf("no row for %s", id)
+		}
+		if col(row, id) != col(head, "ID") {
+			t.Errorf("%s is not under ID: %d vs %d", id, col(row, id), col(head, "ID"))
+		}
+		restorable := "yes"
+		if id == "cccccccc" {
+			restorable = "no"
+		}
+		after := row[strings.Index(row, id):]
+		if c := col(row, restorable+" "); !strings.HasPrefix(after, id) || c < 0 {
+			t.Fatalf("no %q in %q", restorable, row)
+		}
+		// the value starts exactly where RESTORABLE does
+		x := col(head, "RESTORABLE")
+		if !strings.HasPrefix(ansi.Cut(row, x, x+len(restorable)), restorable) {
+			t.Errorf("%s: RESTORABLE value %q is not under its header: %q", id, restorable, row)
+		}
+	}
+	if row, _ := find("dddddddd"); strings.Contains(row, " - ") {
+		t.Errorf("the restored entry should show its restore date, not -: %q", row)
+	}
+	if row, _ := find("aaaaaaaa"); !strings.Contains(row, "very long name") || !strings.Contains(row, "…") || strings.Contains(row, strings.Repeat("very long name ", 4)) {
+		t.Errorf("long name not cut: %q", row)
+	}
+	if _, ok := find("(no name)"); !ok {
+		t.Errorf("an empty name should show (no name)")
+	}
+	// The name is cut at 40 cells at most.
+	row, _ := find("aaaaaaaa")
+	nameAt := col(row, "very long name")
+	if got := ansi.StringWidth(strings.TrimRight(ansi.Cut(row, nameAt, nameAt+60), " │")); got > 40 {
+		t.Errorf("name is %d cells wide, want at most 40: %q", got, row)
 	}
 }

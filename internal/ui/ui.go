@@ -769,48 +769,82 @@ func restoreCmd(e agents.TrashEntry) tea.Cmd {
 	}
 }
 
-// trashPopup draws the trash list: one entry per line, the current one marked,
-// then the result of the last restore. The date column goes first when the
-// popup is narrow.
-func (m Model) trashPopup(w int) []string {
-	t, in := m.trash, w-4
+// Trash popup columns: the same ones `muxlair trash` prints. Each value is as
+// wide as the widest thing in its column, so it sits right under its header.
+const (
+	trashAgentW      = 6  // "claude"
+	trashIDW         = 8  // the first 8 characters of the session id
+	trashDeletedW    = 11 // 01-02 15:04
+	trashRestorableW = 10 // "RESTORABLE"
+	trashRestoredW   = 11 // 01-02 15:04, or "-"
+	trashNameMax     = 40 // longer names are cut here
+)
+
+// trashWidth is the popup width: wide enough for every column, within the window.
+func (m Model) trashWidth() int {
+	if m.width <= 0 {
+		return 100
+	}
+	return max(16, min(100, m.width-6))
+}
+
+// trashPopup draws the trash list: a header, then one entry per line with the
+// current one marked, then the result of the last restore. When the window is
+// narrow, RESTORED and then DELETED are left out, never the name's last 10 cells.
+func (m Model) trashPopup() []string {
+	t, w := m.trash, m.trashWidth()
+	in := w - 4
 	room := max(1, m.boxHeight()-6) // borders, header, blank and message lines
 	top := max(0, t.cur-room+1)
-	const dateW = 11 + 1
-	fixed := 2 + 6 + 1 + 8 + 1 + 4 + 1 // gutter, agent, id, state, gaps
-	date := in >= fixed+dateW+10       // keep at least 10 cells for the name
-	if date {
-		fixed += dateW
+	used := 2 + trashAgentW + 1 + trashIDW + 1 + trashRestorableW + 1 // gutter and the columns always shown
+	showDeleted := in >= used+trashDeletedW+1+10
+	showRestored := in >= used+trashDeletedW+1+trashRestoredW+1+10
+	if showDeleted {
+		used += trashDeletedW + 1
 	}
-	row := func(agent, id, deleted, state, name string) string {
-		if date {
-			return fmt.Sprintf("%-6s %-8s %-11s %-4s %s", agent, id, deleted, state, name)
+	if showRestored {
+		used += trashRestoredW + 1
+	}
+	nameW := max(4, min(trashNameMax, in-used))
+	row := func(agent, id, deleted, restorable, restored, name string) string {
+		out := fmt.Sprintf("%-*s %-*s ", trashAgentW, agent, trashIDW, id)
+		if showDeleted {
+			out += fmt.Sprintf("%-*s ", trashDeletedW, deleted)
 		}
-		return fmt.Sprintf("%-6s %-8s %-4s %s", agent, id, state, name)
+		out += fmt.Sprintf("%-*s ", trashRestorableW, restorable)
+		if showRestored {
+			out += fmt.Sprintf("%-*s ", trashRestoredW, restored)
+		}
+		return out + name
 	}
-	head := colHead.Render("  " + row("AGENT", "ID", "DELETED", "OK", "NAME"))
+	head := colHead.Render("  " + row("AGENT", "ID", "DELETED", "RESTORABLE", "RESTORED", "NAME"))
 	body := []string{padTo(head, in, lipgloss.NewStyle())}
 	for i := top; i < len(t.entries) && i < top+room; i++ {
 		e := t.entries[i]
-		state := "yes"
-		switch {
-		case e.Restored():
-			state = "done"
-		case !e.Restorable():
-			state = "no"
+		restorable, restored := "yes", "-"
+		if !e.Restorable() {
+			restorable = "no"
+		}
+		if e.Restored() {
+			restored = e.Meta.RestoredAt.Local().Format("01-02 15:04")
 		}
 		id := e.Meta.ID
-		if len(id) > 8 {
-			id = id[:8]
+		if len(id) > trashIDW {
+			id = id[:trashIDW]
 		}
-		name := ansi.Truncate(oneLineName(e.Meta.Name), max(4, in-fixed), "…")
-		line := row(e.Meta.Agent, id, e.Meta.DeletedAt.Local().Format("01-02 15:04"), state, name)
-		if i == t.cur {
+		name := oneLineName(e.Meta.Name)
+		if name == "" {
+			name = "(no name)"
+		}
+		name = ansi.Truncate(name, nameW, "…")
+		line := row(e.Meta.Agent, id, e.Meta.DeletedAt.Local().Format("01-02 15:04"), restorable, restored, name)
+		switch {
+		case i == t.cur:
 			sel := lipgloss.NewStyle().Background(selBg)
 			line = sel.Render(padTo("› "+line, in, sel))
-		} else if state != "yes" {
+		case !e.Restorable() || e.Restored():
 			line = dim.Render(padTo("  "+line, in, lipgloss.NewStyle()))
-		} else {
+		default:
 			line = padTo("  "+line, in, lipgloss.NewStyle())
 		}
 		body = append(body, line)
@@ -1514,7 +1548,7 @@ func (m Model) popup() []string {
 	in := w - 4
 	switch {
 	case m.trash != nil:
-		return m.trashPopup(w)
+		return m.trashPopup()
 	case m.help:
 		body, room := m.helpBody(w), m.helpRoom()
 		if len(body)+2 <= room {

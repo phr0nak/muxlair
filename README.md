@@ -164,7 +164,7 @@ Deleting a session, by hand or automatically, puts it in `~/.muxlair/trash/<agen
 
 ### Restoring a session
 
-In the dashboard, press `t` to open the trash. Move with `↑` `↓`, and press `Enter` or `u` to restore the selected entry. The `OK` column says whether it can be restored (`yes`), can't be (`no`, see below), or already was (`done`). The popup shows the result, and the session reappears in the list.
+In the dashboard, press `t` to open the trash. It lists the same columns as `muxlair trash`: `AGENT`, `ID` (the first 8 characters), `DELETED`, `RESTORABLE`, `RESTORED` and `NAME` (cut after 40 characters). Move with `↑` `↓`, and press `Enter` or `u` to restore the selected entry. `RESTORABLE` is `no` when the session file was already gone when it was deleted (see below), and `RESTORED` shows when an entry was restored. The popup shows the result, and the session reappears in the list. In a narrow window, `RESTORED` and then `DELETED` are left out.
 
 From the command line:
 
