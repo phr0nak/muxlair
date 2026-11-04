@@ -120,12 +120,47 @@ const (
 	itemCancel = 5
 )
 
+// trashRow is a trash entry with what the popup shows about it, read once when
+// the list is built. Reading the disk on every key or redraw would let rows shift
+// under the cursor; the restore itself re-checks the files when it runs.
+type trashRow struct {
+	agents.TrashEntry
+	restorable bool // its session files are all there
+	restored   bool // it was restored before
+}
+
+// ok: enter can restore it.
+func (r trashRow) ok() bool { return r.restorable && !r.restored }
+
+func newTrashRows(es []agents.TrashEntry) []trashRow {
+	rows := make([]trashRow, len(es))
+	for i, e := range es {
+		rows[i] = trashRow{e, e.Restorable(), e.Restored()}
+	}
+	return rows
+}
+
 // trashView is the "t" popup: the trash, with a way to restore from it.
 type trashView struct {
-	entries []agents.TrashEntry
-	cur     int
-	msg     string // result of the last restore
-	isErr   bool
+	rows  []trashRow
+	cur   int    // index into visible()
+	hide  bool   // "h": leave out the rows that can't be restored
+	msg   string // result of the last restore
+	isErr bool
+}
+
+// visible is what the popup lists: every row, or only the ones enter can restore.
+func (t *trashView) visible() []trashRow {
+	if !t.hide {
+		return t.rows
+	}
+	var out []trashRow
+	for _, r := range t.rows {
+		if r.ok() {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // keyHelp is the "?" popup: every key and what it does.
@@ -143,7 +178,7 @@ var keyHelp = [][2]string{
 	{"< >", "resize details; dragging works too"},
 	{"mouse drag", "select details text; copied on release"},
 	{"R", "refresh"},
-	{"t", "trash: restore a deleted session"},
+	{"t", "trash: restore a deleted session (h there hides the ones that can't be)"},
 	{"s", "settings"},
 	{"?", "this help"},
 	{"q  ctrl+c", "quit"},
@@ -420,8 +455,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t := m.trash; t != nil {
 			t.msg, t.isErr = result, msg.err != ""
 			if es, _ := agents.ListTrash(); msg.err == "" {
-				t.entries = es // a restored Claude entry leaves the trash; a Codex one is marked
-				t.cur = max(0, min(t.cur, len(es)-1))
+				t.rows = newTrashRows(es) // a restored Claude entry leaves the trash; a Codex one is marked
+				t.cur = max(0, min(t.cur, len(t.visible())-1))
 				if len(es) == 0 {
 					m.trash, m.status = nil, result
 				}
@@ -730,6 +765,8 @@ func (m Model) settingsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // trashKey handles keys while the trash popup is open.
 func (m Model) trashKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	t := m.trash
+	vis := t.visible()
+	t.cur = max(0, min(t.cur, len(vis)-1))
 	switch k.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -738,19 +775,36 @@ func (m Model) trashKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		t.cur = max(0, t.cur-1)
 	case "down", "j":
-		t.cur = min(len(t.entries)-1, t.cur+1)
+		t.cur = max(0, min(len(vis)-1, t.cur+1))
+	case "h":
+		// Keep the selected entry selected when it is still listed.
+		var sel string
+		if t.cur < len(vis) {
+			sel = vis[t.cur].Dir
+		}
+		t.hide, t.msg, t.isErr = !t.hide, "", false
+		vis = t.visible()
+		t.cur = max(0, min(t.cur, len(vis)-1))
+		for i, e := range vis {
+			if e.Dir == sel {
+				t.cur = i
+			}
+		}
 	case "enter", "u":
-		e := t.entries[t.cur]
+		if len(vis) == 0 {
+			return m, nil
+		}
+		r := vis[t.cur]
 		switch {
 		case m.restoring:
 			t.msg, t.isErr = "a restore is still running…", false
-		case e.Restored():
+		case r.restored:
 			t.msg, t.isErr = "already restored (its backup stays in the trash)", true
-		case !e.Restorable():
+		case !r.restorable:
 			t.msg, t.isErr = "can't be restored: its session file is missing, only readable history was saved", true
 		default:
 			m.restoring, t.msg, t.isErr = true, "restoring…", false
-			return m, restoreCmd(e)
+			return m, restoreCmd(r.TrashEntry)
 		}
 	}
 	return m, nil
@@ -840,13 +894,17 @@ func (m Model) trashPopup() []string {
 	}
 	head := colHead.Render("  " + row("AGENT", "ID", "DELETED", "RESTORABLE", "RESTORED", "NAME"))
 	body := []string{padTo(head, in, lipgloss.NewStyle())}
-	for i := top; i < len(t.entries) && i < top+room; i++ {
-		e := t.entries[i]
+	vis := t.visible()
+	if len(vis) == 0 {
+		body = append(body, dim.Render(center("(nothing here can be restored)", in)))
+	}
+	for i := top; i < len(vis) && i < top+room; i++ {
+		e := vis[i]
 		restorable, restored := "yes", "-"
-		if !e.Restorable() {
+		if !e.restorable {
 			restorable = "no"
 		}
-		if e.Restored() {
+		if e.restored {
 			restored = e.Meta.RestoredAt.Local().Format("01-02 15:04")
 		}
 		id := e.Meta.ID
@@ -863,15 +921,26 @@ func (m Model) trashPopup() []string {
 		case i == t.cur:
 			sel := lipgloss.NewStyle().Background(selBg)
 			line = sel.Render(padTo("› "+line, in, sel))
-		case !e.Restorable() || e.Restored():
+		case !e.ok():
 			line = dim.Render(padTo("  "+line, in, lipgloss.NewStyle()))
 		default:
 			line = padTo("  "+line, in, lipgloss.NewStyle())
 		}
 		body = append(body, line)
 	}
+	// Entries enter can't restore: no session file, or already restored.
+	cant := 0
+	for _, r := range t.rows {
+		if !r.ok() {
+			cant++
+		}
+	}
 	msg := ""
 	switch {
+	case t.msg == "" && cant > 0 && t.hide:
+		msg = ansi.Truncate(dim.Render(fmt.Sprintf("%d that can't be restored are hidden · press ", cant))+cursor.Render("h")+dim.Render(" to show them"), in, "…")
+	case t.msg == "" && cant > 0:
+		msg = ansi.Truncate(dim.Render(fmt.Sprintf("%d can't be restored · press ", cant))+cursor.Render("h")+dim.Render(" to hide them"), in, "…")
 	case t.msg == "":
 	case t.isErr:
 		msg = errSty.Render(ansi.Truncate(t.msg, in, "…"))
@@ -1069,7 +1138,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case len(es) == 0:
 			m.status = "the trash is empty"
 		default:
-			m.trash = &trashView{entries: es}
+			m.trash = &trashView{rows: newTrashRows(es)}
 			switch {
 			case m.restoring:
 				m.trash.msg = "a restore is still running…"
@@ -1520,8 +1589,10 @@ func (m Model) View() string {
 	// Repeat the popup's actions here: in a short terminal the popup can be clipped.
 	case m.help:
 		foot = dim.Render("↑↓ scroll · any other key closes")
+	case m.trash != nil && m.trash.hide:
+		foot = dim.Render("↑↓ move · enter/u restore · h show all · esc close")
 	case m.trash != nil:
-		foot = dim.Render("↑↓ move · enter/u restore · esc close")
+		foot = dim.Render("↑↓ move · enter/u restore · h hide non-restorable · esc close")
 	case m.settings != nil:
 		foot = dim.Render("↑↓ move · space/←→ change · enter on Save · ctrl+s save · esc cancel")
 	case m.confirm != nil:

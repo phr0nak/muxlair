@@ -738,7 +738,7 @@ func TestTrashPopupRestoresAndExplains(t *testing.T) {
 	m := New(Options{}, "")
 	m.height, m.width = 30, 100
 	m, _ = press(m, "t")
-	if m.trash == nil || len(m.trash.entries) != 2 {
+	if m.trash == nil || len(m.trash.rows) != 2 {
 		t.Fatalf("popup not open with 2 entries: %+v", m.trash)
 	}
 	v := m.View()
@@ -769,7 +769,7 @@ func TestTrashPopupRestoresAndExplains(t *testing.T) {
 	if _, err := os.Stat(orig); err != nil {
 		t.Fatalf("transcript not back: %v", err)
 	}
-	if m.trash == nil || len(m.trash.entries) != 1 || m.trash.isErr || !strings.Contains(m.trash.msg, "restored Fix the bug") {
+	if m.trash == nil || len(m.trash.rows) != 1 || m.trash.isErr || !strings.Contains(m.trash.msg, "restored Fix the bug") {
 		t.Fatalf("after restore: %+v", m.trash)
 	}
 
@@ -977,5 +977,183 @@ func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 	cut = strings.TrimSpace(strings.SplitN(cut, "│", 2)[0])
 	if got := ansi.StringWidth(cut); got > 40 {
 		t.Errorf("name is %d cells wide, want at most 40: %q", got, cut)
+	}
+}
+
+// "h" inside the trash popup hides the entries that can't be restored, keeps the
+// selected entry selected, and the list index still maps to the right entry.
+func TestTrashHideNonRestorable(t *testing.T) {
+	agents.Home = t.TempDir()
+	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
+	now := time.Now()
+	putTrash(t, "claude", "aaa", "Newest", now, map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
+	putTrash(t, "codex", "bbb", "Dead one", now.Add(-time.Hour), nil) // not restorable
+	putTrash(t, "claude", "ccc", "Oldest", now.Add(-2*time.Hour), map[string]string{"0-ccc.jsonl": filepath.Join(proj, "ccc.jsonl")})
+	// An entry that was already restored still has its files, but enter refuses it.
+	dir := putTrash(t, "codex", "ddd", "Was restored", now.Add(-3*time.Hour), map[string]string{"0-ddd.jsonl": filepath.Join(proj, "ddd.jsonl")})
+	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
+	var meta map[string]any
+	json.Unmarshal(b, &meta)
+	meta["restoredAt"] = now
+	b, _ = json.Marshal(meta)
+	os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o600)
+
+	m := New(Options{}, "")
+	m.height, m.width = 30, 120
+	m, _ = press(m, "t")
+	if got := len(m.trash.visible()); got != 4 {
+		t.Fatalf("all 4 entries should be listed, got %d", got)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "h hide non-restorable") {
+		t.Fatal("the bottom bar does not mention the h key")
+	}
+
+	m, _ = press(m, "h")
+	if got := len(m.trash.visible()); got != 2 {
+		t.Fatalf("after h, the dead and the restored entries should be hidden: %d visible", got)
+	}
+	v := ansi.Strip(m.View())
+	if strings.Contains(v, "Dead one") || strings.Contains(v, "Was restored") || !strings.Contains(v, "Oldest") || !strings.Contains(v, "2 that can't be restored are hidden") || !strings.Contains(v, "h show all") {
+		t.Fatalf("hidden view is wrong:\n%s", v)
+	}
+
+	// Select "Oldest", then toggle: it stays selected whether or not the dead one is shown.
+	m, _ = press(m, "j")
+	sel := func() string { return m.trash.visible()[m.trash.cur].Meta.ID }
+	if sel() != "ccc" {
+		t.Fatalf("selected %s, want ccc", sel())
+	}
+	m, _ = press(m, "h")
+	if len(m.trash.visible()) != 4 || sel() != "ccc" {
+		t.Fatalf("showing all again: %d visible, selected %s", len(m.trash.visible()), sel())
+	}
+	m, _ = press(m, "h")
+	if len(m.trash.visible()) != 2 || sel() != "ccc" {
+		t.Fatalf("hiding again: %d visible, selected %s", len(m.trash.visible()), sel())
+	}
+
+	// With the dead entry hidden, enter restores the entry under the cursor ("Oldest"), not entries[cur].
+	m, cmd := pressType(m, tea.KeyEnter)
+	if cmd == nil {
+		t.Fatal("restore did not start")
+	}
+	nm, _ := m.Update(cmd())
+	m = nm.(Model)
+	if _, err := os.Stat(filepath.Join(proj, "ccc.jsonl")); err != nil {
+		t.Fatalf("the selected entry was not restored: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, "aaa.jsonl")); err == nil {
+		t.Fatal("restored the wrong entry")
+	}
+	if m.trash == nil || !m.trash.hide {
+		t.Fatalf("the popup should stay open and keep hiding: %+v", m.trash)
+	}
+}
+
+// Everything hidden: the popup says so, and the keys don't crash.
+func TestTrashHideEverything(t *testing.T) {
+	agents.Home = t.TempDir()
+	putTrash(t, "codex", "bbb", "Dead one", time.Now(), nil)
+	m := New(Options{}, "")
+	m.height, m.width = 30, 120
+	m, _ = press(m, "t")
+	m, _ = press(m, "h")
+	if len(m.trash.visible()) != 0 || !strings.Contains(ansi.Strip(m.View()), "nothing here can be restored") {
+		t.Fatalf("empty hidden view:\n%s", ansi.Strip(m.View()))
+	}
+	m, cmd := pressType(m, tea.KeyEnter)
+	m, _ = press(m, "j")
+	m, _ = press(m, "k")
+	if cmd != nil {
+		t.Fatal("enter did something with nothing listed")
+	}
+	m, _ = press(m, "h")
+	if len(m.trash.visible()) != 1 {
+		t.Fatal("h should show the entry again")
+	}
+}
+
+// Opening the popup tells the user about "h" when there is something it would hide.
+func TestTrashPopupHintsAtHOnOpen(t *testing.T) {
+	agents.Home = t.TempDir()
+	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
+	putTrash(t, "claude", "aaa", "Fine", time.Now(), map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
+	m := New(Options{}, "")
+	m.height, m.width = 30, 120
+	m, _ = press(m, "t")
+	if strings.Contains(ansi.Strip(m.View()), "press h") {
+		t.Fatal("hinted at h with nothing to hide")
+	}
+	m, _ = pressType(m, tea.KeyEsc)
+
+	putTrash(t, "codex", "bbb", "Dead one", time.Now().Add(-time.Hour), nil)
+	m, _ = press(m, "t")
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "1 can't be restored · press h to hide them") {
+		t.Fatalf("no hint on open:\n%s", v)
+	}
+	m, _ = press(m, "h")
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "1 that can't be restored are hidden · press h to show them") {
+		t.Fatalf("no hint after hiding:\n%s", v)
+	}
+	// At the narrowest supported window the note must stay inside the popup.
+	for _, hide := range []bool{true, false} {
+		n := New(Options{}, "")
+		n.height, n.width = 20, 44
+		n, _ = press(n, "t")
+		if hide {
+			n, _ = press(n, "h")
+		}
+		for i, line := range strings.Split(n.View(), "\n") {
+			if w := ansi.StringWidth(line); w > 44 {
+				t.Fatalf("hide=%v: line %d is %d cells wide:\n%s", hide, i, w, ansi.Strip(line))
+			}
+		}
+	}
+}
+
+// The rows are read once: a saved file that disappears while the popup is open
+// does not shift the list under the cursor, so enter still acts on the row the
+// user picked. The restore re-checks the files and says what is missing.
+func TestTrashRowsDoNotShiftUnderTheCursor(t *testing.T) {
+	agents.Home = t.TempDir()
+	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
+	now := time.Now()
+	dirA := putTrash(t, "claude", "aaa", "First", now, map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
+	putTrash(t, "claude", "bbb", "Second", now.Add(-time.Hour), map[string]string{"0-bbb.jsonl": filepath.Join(proj, "bbb.jsonl")})
+	m := New(Options{}, "")
+	m.height, m.width = 30, 120
+	m, _ = press(m, "t")
+	m, _ = press(m, "h")
+	m, _ = press(m, "j")                          // on "Second"
+	os.Remove(filepath.Join(dirA, "0-aaa.jsonl")) // an EARLIER row stops being restorable behind the user's back
+	if got := m.trash.visible()[m.trash.cur].Meta.ID; got != "bbb" {
+		t.Fatalf("the cursor moved to %s", got)
+	}
+	m, cmd := pressType(m, tea.KeyEnter)
+	if cmd == nil {
+		t.Fatal("enter did not start the restore")
+	}
+	nm, _ := m.Update(cmd())
+	m = nm.(Model)
+	if _, err := os.Stat(filepath.Join(proj, "bbb.jsonl")); err != nil {
+		t.Fatalf("the selected entry (Second) was not restored: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, "aaa.jsonl")); err == nil {
+		t.Fatal("restored the wrong entry")
+	}
+
+	// And an entry whose file vanished after the list was built is refused with a reason.
+	m2 := New(Options{}, "")
+	m2.height, m2.width = 30, 120
+	agents.Home = t.TempDir()
+	dir := putTrash(t, "claude", "ccc", "Gone", now, map[string]string{"0-ccc.jsonl": filepath.Join(agents.Home, "x", "ccc.jsonl")})
+	m2, _ = press(m2, "t")
+	os.Remove(filepath.Join(dir, "0-ccc.jsonl"))
+	m2, cmd2 := pressType(m2, tea.KeyEnter)
+	nm2, _ := m2.Update(cmd2())
+	m2 = nm2.(Model)
+	if m2.trash == nil || !m2.trash.isErr || !strings.Contains(m2.trash.msg, "missing") {
+		t.Fatalf("a vanished file should be reported: %+v", m2.trash)
 	}
 }
