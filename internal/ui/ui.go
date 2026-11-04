@@ -789,7 +789,7 @@ func (m Model) trashKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				t.cur = i
 			}
 		}
-	case "enter", "u":
+	case "enter":
 		if len(vis) == 0 {
 			return m, nil
 		}
@@ -1586,9 +1586,9 @@ func (m Model) View() string {
 	case m.help:
 		foot = dim.Render("↑↓ scroll · any other key closes")
 	case m.trash != nil && m.trash.hide:
-		foot = dim.Render("↑↓ move · enter/u restore · h show all · esc close")
+		foot = dim.Render("↑↓ move · enter restore · h show all · esc close")
 	case m.trash != nil:
-		foot = dim.Render("↑↓ move · enter/u restore · h hide non-restorable · esc close")
+		foot = dim.Render("↑↓ move · enter restore · h hide non-restorable · esc close")
 	case m.settings != nil:
 		foot = dim.Render("↑↓ move · space/←→ change · enter on Save · ctrl+s save · esc cancel")
 	case m.confirm != nil:

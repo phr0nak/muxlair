@@ -742,7 +742,7 @@ func TestTrashPopupRestoresAndExplains(t *testing.T) {
 		t.Fatalf("popup not open with 2 entries: %+v", m.trash)
 	}
 	v := m.View()
-	for _, want := range []string{"Trash", "RESTORABLE", "RESTORED", "Fix the bug", "Dead one", "enter/u restore"} {
+	for _, want := range []string{"Trash", "RESTORABLE", "RESTORED", "Fix the bug", "Dead one", "enter restore"} {
 		if !strings.Contains(ansi.Strip(v), want) {
 			t.Fatalf("view lacks %q:\n%s", want, ansi.Strip(v))
 		}
@@ -1158,5 +1158,25 @@ func TestTrashRowsDoNotShiftUnderTheCursor(t *testing.T) {
 	m2 = nm2.(Model)
 	if m2.trash == nil || !m2.trash.isErr || !strings.Contains(m2.trash.msg, "missing") {
 		t.Fatalf("a vanished file should be reported: %+v", m2.trash)
+	}
+}
+
+// Enter is the only restore key in the trash popup; u is not bound.
+func TestTrashPopupUIsNotARestoreKey(t *testing.T) {
+	agents.Home = t.TempDir()
+	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
+	putTrash(t, "claude", "aaa", "Fine", time.Now(), map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
+	m := New(Options{}, "")
+	m.height, m.width = 30, 120
+	m, _ = press(m, "t")
+	m, cmd := press(m, "u")
+	if cmd != nil || m.restoring || m.trash == nil || m.trash.msg != "" {
+		t.Fatalf("u did something in the popup: cmd=%v restoring=%v trash=%+v", cmd != nil, m.restoring, m.trash)
+	}
+	if strings.Contains(ansi.Strip(m.View()), "enter/u") {
+		t.Fatal("the bottom bar still mentions u")
+	}
+	if _, cmd := pressType(m, tea.KeyEnter); cmd == nil {
+		t.Fatal("enter should still restore")
 	}
 }
