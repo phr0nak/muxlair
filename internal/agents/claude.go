@@ -46,6 +46,9 @@ type claudeLive struct {
 	tty        string
 }
 
+// Unnamed is shown for a Claude session that has no title and no prompt yet.
+const Unnamed = "(unnamed)"
+
 func listClaude() ([]Session, error) {
 	live, liveErr := claudeLiveSessions()
 	files, _ := filepath.Glob(filepath.Join(Home, ".claude", "projects", "*", "*.jsonl"))
@@ -59,8 +62,7 @@ func listClaude() ([]Session, error) {
 		m := claudeMeta(f, st)
 		id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
 		s := Session{Agent: "claude", ID: id, Cwd: m.cwd, Updated: st.ModTime(), Files: claudeFiles(f, id)}
-		s.Name = firstNonEmpty(m.title, m.aiTitle, m.lastPrompt, id[:min(8, len(id))])
-		s.titled = m.title != "" || m.aiTitle != ""
+		s.Name = firstNonEmpty(m.title, m.aiTitle, m.lastPrompt, Unnamed)
 		s.Headless = m.entrypoint == "sdk-cli" && !m.interactive
 		if s.Cwd == "" {
 			s.Cwd = filepath.Base(filepath.Dir(f))
@@ -74,7 +76,7 @@ func listClaude() ([]Session, error) {
 		i, ok := byID[l.SessionID]
 		if !ok {
 			// Live but no transcript yet (fresh session).
-			out = append(out, Session{Agent: "claude", ID: l.SessionID, Cwd: l.Cwd, Name: l.SessionID[:min(8, len(l.SessionID))]})
+			out = append(out, Session{Agent: "claude", ID: l.SessionID, Cwd: l.Cwd, Name: Unnamed})
 			i = len(out) - 1
 			byID[l.SessionID] = i
 		}
@@ -93,8 +95,8 @@ func listClaude() ([]Session, error) {
 			s.Status = Busy
 		}
 		// A user-set live name reflects /rename instantly. A derived one ("twinpeaks-64")
-		// is Claude's auto-dedupe and only beats having no title at all.
-		if l.Name != "" && (l.NameSource == "user" || !s.titled) {
+		// is Claude making up a name from the folder, not a name: it is never shown.
+		if l.Name != "" && l.NameSource == "user" {
 			s.Name = l.Name
 		}
 		if l.Cwd != "" {
