@@ -1585,10 +1585,17 @@ func (m Model) View() string {
 	// Repeat the popup's actions here: in a short terminal the popup can be clipped.
 	case m.help:
 		foot = dim.Render("↑↓ scroll · any other key closes")
-	case m.trash != nil && m.trash.hide:
-		foot = dim.Render("↑↓ move · enter restore · h show all · esc close")
 	case m.trash != nil:
-		foot = dim.Render("↑↓ move · enter restore · h hide non-restorable · esc close")
+		h := "h hide non-restorable"
+		if m.trash.hide {
+			h = "h show all"
+		}
+		// The full wording when it fits; the short one in a narrow window, so no key is cut off.
+		foot = "↑↓ move · enter restore the selected session · " + h + " · esc close"
+		if m.width > 0 && ansi.StringWidth(foot) > m.width {
+			foot = "↑↓ move · enter restore · " + h + " · esc close"
+		}
+		foot = dim.Render(foot)
 	case m.settings != nil:
 		foot = dim.Render("↑↓ move · space/←→ change · enter on Save · ctrl+s save · esc cancel")
 	case m.confirm != nil:

@@ -1180,3 +1180,32 @@ func TestTrashPopupUIsNotARestoreKey(t *testing.T) {
 		t.Fatal("enter should still restore")
 	}
 }
+
+// The popup's bottom bar spells out what enter does, and falls back to a shorter
+// line when the window is too narrow for it.
+func TestTrashBottomBarWording(t *testing.T) {
+	agents.Home = t.TempDir()
+	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
+	putTrash(t, "claude", "aaa", "Fine", time.Now(), map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
+	last := func(m Model) string {
+		lines := strings.Split(ansi.Strip(m.View()), "\n")
+		return strings.TrimSpace(lines[len(lines)-1])
+	}
+	wide := New(Options{}, "")
+	wide.height, wide.width = 30, 120
+	wide, _ = press(wide, "t")
+	if got := last(wide); !strings.Contains(got, "enter restore the selected session") || !strings.Contains(got, "h hide non-restorable") || !strings.Contains(got, "esc close") {
+		t.Fatalf("wide bar: %q", got)
+	}
+	wide, _ = press(wide, "h")
+	if got := last(wide); !strings.Contains(got, "enter restore the selected session") || !strings.Contains(got, "h show all") {
+		t.Fatalf("wide bar after h: %q", got)
+	}
+	narrow := New(Options{}, "")
+	narrow.height, narrow.width = 30, 60
+	narrow, _ = press(narrow, "t")
+	got := last(narrow)
+	if strings.Contains(got, "the selected session") || !strings.Contains(got, "enter restore") || !strings.Contains(got, "esc close") || ansi.StringWidth(got) > 60 {
+		t.Fatalf("narrow bar: %q (%d cells)", got, ansi.StringWidth(got))
+	}
+}
