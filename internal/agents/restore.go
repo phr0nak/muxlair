@@ -183,7 +183,7 @@ func restoreCodex(e TrashEntry) ([]string, error) {
 		items = append(items, item{filepath.Join(e.Dir, name), dst, e.Meta.ID})
 	}
 	if len(items) == 0 {
-		return nil, errors.New("this entry has no session file: it was already gone when the session was deleted (it showed as dead), so Codex couldn't reopen it then either. Only its readable history (history.jsonl) was saved")
+		return nil, errors.New("this entry has no session file: it was already gone when the session was deleted (it showed as dead), so Codex couldn't reopen it then either. Only its history was saved; read it with: muxlair export codex " + e.Meta.ID)
 	}
 	helpers, _ := filepath.Glob(filepath.Join(e.Dir, "helper-rollout-*.jsonl"))
 	for _, h := range helpers {
