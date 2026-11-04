@@ -137,7 +137,7 @@ Any other argument prints the usage and exits with status 2.
 | `TTY` | The terminal the session runs in, empty when it isn't running |
 | `MAYBELIVE` | `true` when an unidentified agent process may be using it (`in use?` in the dashboard) |
 | `CWD` | The folder the session ran in |
-| `NAME` | The session name. A session with no name, title or prompt yet shows `(unnamed)`, for Claude and Codex alike; the name Claude makes up from the folder (like `stuff-50`) is not shown |
+| `NAME` | The session name. A Claude session with no title and no prompt yet shows `(unnamed)`; the name Claude makes up from the folder (like `stuff-50`) is not shown |
 
 ## Automatic cleanup
 

@@ -65,7 +65,7 @@ func listCodex() ([]Session, error) {
 		if n := names[s.ID]; n != "" {
 			s.Name = n
 		}
-		s.Name = oneLine(firstNonEmpty(s.Name, Unnamed)) // full; the UI truncates
+		s.Name = oneLine(firstNonEmpty(s.Name, s.ID[:min(8, len(s.ID))])) // full; the UI truncates
 		s.Updated = time.UnixMilli(updated.Int64)
 		if st, err := os.Stat(rollout); err == nil {
 			if st.ModTime().After(s.Updated) {

@@ -46,7 +46,7 @@ type claudeLive struct {
 	tty        string
 }
 
-// Unnamed is shown for a session (Claude or Codex) with no name, title or prompt.
+// Unnamed is shown for a Claude session that has no title and no prompt yet.
 const Unnamed = "(unnamed)"
 
 func listClaude() ([]Session, error) {
