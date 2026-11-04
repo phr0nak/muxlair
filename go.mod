@@ -6,9 +6,9 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.8.0
-	github.com/fsnotify/fsnotify v1.8.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/muesli/termenv v0.16.0
-	golang.org/x/sys v0.30.0
+	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.34.5
 )
 
