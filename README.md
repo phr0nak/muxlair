@@ -119,13 +119,13 @@ Press `?` in `muxlair` to see these at any time.
 | `muxlair` | Starts the dashboard. Run it inside `tmux` or `cmux`. |
 | `muxlair --help` (`-h`) | Shows the usage and exits. |
 | `muxlair --version` (`-v`) | Prints the version and exits. A release prints its tag, such as `v0.1.0`; a build from source prints `dev` or a commit-based version. |
-| `muxlair --list` | Prints every session as an aligned table and exits, without starting the dashboard. Useful for debugging or scripting. |
+| `muxlair list` (`--list`) | Prints every session as an aligned table and exits, without starting the dashboard. Useful for debugging or scripting. |
 | `muxlair trash` | Lists the sessions in `~/.muxlair/trash`, newest first. |
 | `muxlair restore <agent> <id>` | Puts a trashed session back. `<agent>` is `claude` or `codex`; take the ID from `muxlair trash`. See [Restoring](#restoring-a-session). |
 
 Any other argument prints the usage and exits with status 2.
 
-`--list` prints a header row, then one line per session, newest first. The columns are:
+`muxlair list` prints a header row, then one line per session, newest first. The columns are:
 
 | Column | Meaning |
 |---|---|
