@@ -242,7 +242,7 @@ EOF
 ## Known limitations
 
 - **Agent file formats can change.** `muxlair` reads Claude Code's and Codex's own files (transcripts, session records, Codex's databases). These are not stable, documented interfaces, so an agent update can break session discovery, names or the details pane until `muxlair` catches up.
-- **Platforms.** `muxlair` is developed and tested on macOS. Linux should work, but its process detection (a `ps` fallback) is untested. Windows is not supported.
+- **Platforms.** `muxlair` is developed and tested on macOS only. It has not been tested on Linux, and may not work there yet. Known issue: if Codex runs with its shared app-server daemon, a running Codex session can't be matched to its terminal, so jump and rename-in-place don't work for it. Windows is not supported.
 - **Restoring Codex sessions is best effort.** A restored session comes back from its session file only. Turns that Codex keeps solely in its own history database, and details such as token counts, may be missing. See [Restoring](#restoring-a-session).
 - **Only Claude Code and Codex.** Other agents are not supported yet.
 
