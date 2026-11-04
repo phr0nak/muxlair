@@ -769,53 +769,74 @@ func restoreCmd(e agents.TrashEntry) tea.Cmd {
 	}
 }
 
-// Trash popup columns: the same ones `muxlair trash` prints. Each value is as
-// wide as the widest thing in its column, so it sits right under its header.
-const (
-	trashAgentW      = 6  // "claude"
-	trashIDW         = 8  // the first 8 characters of the session id
-	trashDeletedW    = 11 // 01-02 15:04
-	trashRestorableW = 10 // "RESTORABLE"
-	trashRestoredW   = 11 // 01-02 15:04, or "-"
-	trashNameMax     = 40 // longer names are cut here
+// Trash popup columns: the same ones `muxlair trash` prints. Each column has a
+// fixed width and its text is centered in it, so values sit centered under
+// their headers.
+type trashLayout struct{ agent, id, deleted, restorable, restored, gap int }
+
+var (
+	trashRoomy   = trashLayout{agent: 8, id: 10, deleted: 13, restorable: 12, restored: 13, gap: 2}
+	trashCompact = trashLayout{agent: 6, id: 8, deleted: 11, restorable: 10, restored: 11, gap: 1} // narrow windows
 )
 
-// trashWidth is the popup width: wide enough for every column, within the window.
+const (
+	trashNameMax  = 40  // longer names are cut here
+	trashMaxWidth = 130 // the popup never grows past this
+)
+
+// trashWidth is the popup width: as wide as the window allows, up to trashMaxWidth.
 func (m Model) trashWidth() int {
 	if m.width <= 0 {
-		return 100
+		return trashMaxWidth
 	}
-	return max(16, min(100, m.width-6))
+	return max(16, min(trashMaxWidth, m.width-6))
+}
+
+// center pads s on both sides to w cells (the extra cell of an odd gap goes right).
+func center(s string, w int) string {
+	n := ansi.StringWidth(s)
+	if n >= w {
+		return s
+	}
+	left := (w - n) / 2
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", w-n-left)
 }
 
 // trashPopup draws the trash list: a header, then one entry per line with the
 // current one marked, then the result of the last restore. When the window is
-// narrow, RESTORED and then DELETED are left out, never the name's last 10 cells.
+// narrow it uses tighter columns, and drops RESTORED and then DELETED, but
+// never the name's last 10 cells.
 func (m Model) trashPopup() []string {
 	t, w := m.trash, m.trashWidth()
 	in := w - 4
 	room := max(1, m.boxHeight()-6) // borders, header, blank and message lines
 	top := max(0, t.cur-room+1)
-	used := 2 + trashAgentW + 1 + trashIDW + 1 + trashRestorableW + 1 // gutter and the columns always shown
-	showDeleted := in >= used+trashDeletedW+1+10
-	showRestored := in >= used+trashDeletedW+1+trashRestoredW+1+10
+	c := trashRoomy
+	if base := 2 + c.agent + c.id + c.restorable + 3*c.gap; in < base+10 {
+		c = trashCompact
+	}
+	used := 2 + c.agent + c.gap + c.id + c.gap + c.restorable + c.gap // gutter and the columns always shown
+	showDeleted := in >= used+c.deleted+c.gap+10
+	showRestored := showDeleted && in >= used+c.deleted+c.gap+c.restored+c.gap+10
 	if showDeleted {
-		used += trashDeletedW + 1
+		used += c.deleted + c.gap
 	}
 	if showRestored {
-		used += trashRestoredW + 1
+		used += c.restored + c.gap
 	}
-	nameW := max(4, min(trashNameMax, in-used))
+	nameCol := max(4, in-used)
+	nameW := min(trashNameMax, nameCol)
+	gap := strings.Repeat(" ", c.gap)
 	row := func(agent, id, deleted, restorable, restored, name string) string {
-		out := fmt.Sprintf("%-*s %-*s ", trashAgentW, agent, trashIDW, id)
+		cells := []string{center(agent, c.agent), center(id, c.id)}
 		if showDeleted {
-			out += fmt.Sprintf("%-*s ", trashDeletedW, deleted)
+			cells = append(cells, center(deleted, c.deleted))
 		}
-		out += fmt.Sprintf("%-*s ", trashRestorableW, restorable)
+		cells = append(cells, center(restorable, c.restorable))
 		if showRestored {
-			out += fmt.Sprintf("%-*s ", trashRestoredW, restored)
+			cells = append(cells, center(restored, c.restored))
 		}
-		return out + name
+		return strings.Join(cells, gap) + gap + center(name, nameCol)
 	}
 	head := colHead.Render("  " + row("AGENT", "ID", "DELETED", "RESTORABLE", "RESTORED", "NAME"))
 	body := []string{padTo(head, in, lipgloss.NewStyle())}
@@ -829,8 +850,8 @@ func (m Model) trashPopup() []string {
 			restored = e.Meta.RestoredAt.Local().Format("01-02 15:04")
 		}
 		id := e.Meta.ID
-		if len(id) > trashIDW {
-			id = id[:trashIDW]
+		if len(id) > 8 {
+			id = id[:8]
 		}
 		name := oneLineName(e.Meta.Name)
 		if name == "" {

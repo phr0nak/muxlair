@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -871,8 +872,8 @@ func TestTrashPopupFitsNarrowWindow(t *testing.T) {
 	}
 }
 
-// The columns are the ones `muxlair trash` prints, in the same order, and each
-// value sits right under its header. Long names are cut, and an empty one says so.
+// The columns are the ones `muxlair trash` prints, in the same order, with each
+// value centered under its header. Long names are cut, and an empty one says so.
 func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 	agents.Home = t.TempDir()
 	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
@@ -902,46 +903,65 @@ func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 		}
 		return "", false
 	}
-	col := func(line, token string) int { // display column of the token
-		i := strings.Index(line, token)
-		if i < 0 {
-			return -1
+	// span returns the display columns [from, to) of the idx-th word after `after` in line.
+	words := regexp.MustCompile(`\S+`)
+	span := func(line, after string, idx int) (int, int) {
+		at := strings.Index(line, after) + len(after)
+		ws := words.FindAllStringIndex(line[at:], -1)
+		if len(ws) <= idx {
+			t.Fatalf("no word %d after %q in %q", idx, after, line)
 		}
-		return ansi.StringWidth(line[:i])
+		return ansi.StringWidth(line[:at+ws[idx][0]]), ansi.StringWidth(line[:at+ws[idx][1]])
 	}
+	mid := func(a, b int) int { return (a + b) / 2 }
+
 	head, ok := find("RESTORABLE")
 	if !ok {
 		t.Fatalf("no header:\n%s", strings.Join(lines, "\n"))
 	}
+	hmid := map[string]int{}
 	last := -1
 	for _, h := range []string{"AGENT", "ID", "DELETED", "RESTORABLE", "RESTORED", "NAME"} {
-		c := col(head, h)
+		c := strings.Index(head, h)
 		if c <= last {
 			t.Fatalf("header column %s is out of order: %q", h, head)
 		}
 		last = c
+		hmid[h] = mid(ansi.StringWidth(head[:c]), ansi.StringWidth(head[:c+len(h)]))
+	}
+	near := func(what, id string, got, want int) {
+		if d := got - want; d < -1 || d > 1 {
+			t.Errorf("%s of %s is centered at %d, its header at %d (centered columns may differ by 1 cell)", what, id, got, want)
+		}
 	}
 	for _, id := range []string{"aaaaaaaa", "bbbbbbbb", "cccccccc", "dddddddd"} {
 		row, ok := find(id)
 		if !ok {
 			t.Fatalf("no row for %s", id)
 		}
-		if col(row, id) != col(head, "ID") {
-			t.Errorf("%s is not under ID: %d vs %d", id, col(row, id), col(head, "ID"))
-		}
-		restorable := "yes"
+		ia := ansi.StringWidth(row[:strings.Index(row, id)])
+		near("ID", id, mid(ia, ia+len(id)), hmid["ID"])
+		// words after the id: date (2 words), RESTORABLE, then RESTORED (1 or 2 words), then the name
+		d1, _ := span(row, id, 0)
+		_, d2 := span(row, id, 1)
+		near("DELETED", id, mid(d1, d2), hmid["DELETED"])
+		r1, r2 := span(row, id, 2)
+		want := "yes"
 		if id == "cccccccc" {
-			restorable = "no"
+			want = "no"
 		}
-		after := row[strings.Index(row, id):]
-		if c := col(row, restorable+" "); !strings.HasPrefix(after, id) || c < 0 {
-			t.Fatalf("no %q in %q", restorable, row)
+		if got := row[strings.Index(row, id):]; !strings.Contains(got, " "+want+" ") {
+			t.Fatalf("%s: expected RESTORABLE %q in %q", id, want, row)
 		}
-		// the value starts exactly where RESTORABLE does
-		x := col(head, "RESTORABLE")
-		if !strings.HasPrefix(ansi.Cut(row, x, x+len(restorable)), restorable) {
-			t.Errorf("%s: RESTORABLE value %q is not under its header: %q", id, restorable, row)
-		}
+		near("RESTORABLE", id, mid(r1, r2), hmid["RESTORABLE"])
+	}
+	// The agent value is centered under AGENT, and the name under NAME.
+	{
+		row, _ := find("bbbbbbbb")
+		a := strings.Index(row, "claude")
+		near("AGENT", "bbbbbbbb", mid(ansi.StringWidth(row[:a]), ansi.StringWidth(row[:a])+len("claude")), hmid["AGENT"])
+		n := strings.Index(row, "(no name)")
+		near("NAME", "bbbbbbbb", mid(ansi.StringWidth(row[:n]), ansi.StringWidth(row[:n])+len("(no name)")), hmid["NAME"])
 	}
 	if row, _ := find("dddddddd"); strings.Contains(row, " - ") {
 		t.Errorf("the restored entry should show its restore date, not -: %q", row)
@@ -949,13 +969,13 @@ func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 	if row, _ := find("aaaaaaaa"); !strings.Contains(row, "very long name") || !strings.Contains(row, "…") || strings.Contains(row, strings.Repeat("very long name ", 4)) {
 		t.Errorf("long name not cut: %q", row)
 	}
-	if _, ok := find("(no name)"); !ok {
-		t.Errorf("an empty name should show (no name)")
-	}
 	// The name is cut at 40 cells at most.
 	row, _ := find("aaaaaaaa")
-	nameAt := col(row, "very long name")
-	if got := ansi.StringWidth(strings.TrimRight(ansi.Cut(row, nameAt, nameAt+60), " │")); got > 40 {
-		t.Errorf("name is %d cells wide, want at most 40: %q", got, row)
+	n := strings.Index(row, "very long name")
+	cut := strings.TrimSpace(row[n:])
+	cut = strings.TrimSpace(strings.TrimSuffix(cut, "│"))
+	cut = strings.TrimSpace(strings.SplitN(cut, "│", 2)[0])
+	if got := ansi.StringWidth(cut); got > 40 {
+		t.Errorf("name is %d cells wide, want at most 40: %q", got, cut)
 	}
 }
