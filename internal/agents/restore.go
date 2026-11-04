@@ -35,9 +35,10 @@ func (e TrashEntry) Restorable() bool {
 	return len(e.Meta.Files) > 0
 }
 
-// State is what the RESTORABLE column shows: "done" for an entry that was
-// already restored (enter refuses it), "no" when its session files are missing,
-// "yes" when it can be restored.
+// State is what the dashboard's trash popup shows in its RESTORABLE column:
+// "done" for an entry that was already restored (enter refuses it), "no" when its
+// session files are missing, "yes" when it can be restored. `muxlair trash`
+// shows only yes or no (Restorable), and the restore date in its own column.
 func (e TrashEntry) State() string {
 	switch {
 	case e.Restored():
