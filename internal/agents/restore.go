@@ -35,6 +35,19 @@ func (e TrashEntry) Restorable() bool {
 	return len(e.Meta.Files) > 0
 }
 
+// State is what the RESTORABLE column shows: "done" for an entry that was
+// already restored (enter refuses it), "no" when its session files are missing,
+// "yes" when it can be restored.
+func (e TrashEntry) State() string {
+	switch {
+	case e.Restored():
+		return "done"
+	case !e.Restorable():
+		return "no"
+	}
+	return "yes"
+}
+
 // ListTrash returns the trash entries, newest first. An entry whose meta.json
 // can't be read is skipped and reported in the error.
 func ListTrash() ([]TrashEntry, error) {

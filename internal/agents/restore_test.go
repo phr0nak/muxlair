@@ -320,3 +320,24 @@ func TestRestoreEntryPicksTheGivenEntry(t *testing.T) {
 		t.Fatalf("restoring a restored entry: %v", err)
 	}
 }
+
+// State is the RESTORABLE column of both `muxlair trash` and the dashboard's popup.
+func TestTrashEntryState(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "0-a"), []byte("x"), 0o600)
+	now := time.Now()
+	for name, tc := range map[string]struct {
+		e    TrashEntry
+		want string
+	}{
+		"files present":           {TrashEntry{dir, trashMeta{Files: map[string]string{"0-a": "/o/a"}}}, "yes"},
+		"no session file":         {TrashEntry{dir, trashMeta{}}, "no"},
+		"a file never arrived":    {TrashEntry{dir, trashMeta{Files: map[string]string{"0-a": "/o/a", "1-b": "/o/b"}}}, "no"},
+		"already restored":        {TrashEntry{dir, trashMeta{Files: map[string]string{"0-a": "/o/a"}, RestoredAt: &now}}, "done"},
+		"restored, files missing": {TrashEntry{dir, trashMeta{RestoredAt: &now}}, "done"},
+	} {
+		if got := tc.e.State(); got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
+		}
+	}
+}

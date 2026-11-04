@@ -947,8 +947,11 @@ func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 		near("DELETED", id, mid(d1, d2), hmid["DELETED"])
 		r1, r2 := span(row, id, 2)
 		want := "yes"
-		if id == "cccccccc" {
-			want = "no"
+		switch id {
+		case "cccccccc":
+			want = "no" // no session file
+		case "dddddddd":
+			want = "done" // already restored
 		}
 		if got := row[strings.Index(row, id):]; !strings.Contains(got, " "+want+" ") {
 			t.Fatalf("%s: expected RESTORABLE %q in %q", id, want, row)

@@ -125,17 +125,16 @@ const (
 // under the cursor; the restore itself re-checks the files when it runs.
 type trashRow struct {
 	agents.TrashEntry
-	restorable bool // its session files are all there
-	restored   bool // it was restored before
+	state string // the RESTORABLE column: "yes", "no" or "done" (see TrashEntry.State)
 }
 
 // ok: enter can restore it.
-func (r trashRow) ok() bool { return r.restorable && !r.restored }
+func (r trashRow) ok() bool { return r.state == "yes" }
 
 func newTrashRows(es []agents.TrashEntry) []trashRow {
 	rows := make([]trashRow, len(es))
 	for i, e := range es {
-		rows[i] = trashRow{e, e.Restorable(), e.Restored()}
+		rows[i] = trashRow{e, e.State()}
 	}
 	return rows
 }
@@ -149,7 +148,7 @@ type trashView struct {
 	isErr bool
 }
 
-// visible is what the popup lists: every row, or only the ones enter can restore.
+// visible is what the popup lists: every row, or only the ones with state "yes".
 func (t *trashView) visible() []trashRow {
 	if !t.hide {
 		return t.rows
@@ -798,9 +797,9 @@ func (m Model) trashKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case m.restoring:
 			t.msg, t.isErr = "a restore is still running…", false
-		case r.restored:
+		case r.state == "done":
 			t.msg, t.isErr = "already restored (its backup stays in the trash)", true
-		case !r.restorable:
+		case r.state == "no":
 			t.msg, t.isErr = "can't be restored: its session file is missing, only readable history was saved", true
 		default:
 			m.restoring, t.msg, t.isErr = true, "restoring…", false
@@ -900,11 +899,8 @@ func (m Model) trashPopup() []string {
 	}
 	for i := top; i < len(vis) && i < top+room; i++ {
 		e := vis[i]
-		restorable, restored := "yes", "-"
-		if !e.restorable {
-			restorable = "no"
-		}
-		if e.restored {
+		restored := "-"
+		if e.Restored() {
 			restored = e.Meta.RestoredAt.Local().Format("01-02 15:04")
 		}
 		id := e.Meta.ID
@@ -916,7 +912,7 @@ func (m Model) trashPopup() []string {
 			name = "(no name)"
 		}
 		name = ansi.Truncate(name, nameW, "…")
-		line := row(e.Meta.Agent, id, e.Meta.DeletedAt.Local().Format("01-02 15:04"), restorable, restored, name)
+		line := row(e.Meta.Agent, id, e.Meta.DeletedAt.Local().Format("01-02 15:04"), e.state, restored, name)
 		switch {
 		case i == t.cur:
 			sel := lipgloss.NewStyle().Background(selBg)

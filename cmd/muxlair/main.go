@@ -114,13 +114,9 @@ func listTrash() {
 	for _, e := range es {
 		restored := "-"
 		if e.Restored() {
-			restored = e.Meta.RestoredAt.Format("2006-01-02 15:04")
+			restored = e.Meta.RestoredAt.Local().Format("2006-01-02 15:04")
 		}
-		restorable := "yes"
-		if !e.Restorable() {
-			restorable = "no"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Format("2006-01-02 15:04"), restorable, restored, e.Meta.Name)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Local().Format("2006-01-02 15:04"), e.State(), restored, e.Meta.Name)
 	}
 	w.Flush()
 }

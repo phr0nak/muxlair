@@ -164,7 +164,7 @@ Deleting a session, by hand or automatically, puts it in `~/.muxlair/trash/<agen
 
 ### Restoring a session
 
-In the dashboard, press `t` to open the trash. It lists the same columns as `muxlair trash`, centered under their headers: `AGENT`, `ID` (the first 8 characters), `DELETED`, `RESTORABLE`, `RESTORED` and `NAME` (cut after 40 characters). Move with `↑` `↓`, and press `Enter` or `u` to restore the selected entry. `RESTORABLE` is `no` when the session file was already gone when it was deleted (see below), and `RESTORED` shows when an entry was restored. When some entries can't be restored, the popup tells you how many and reminds you that `h` hides them (the `no` ones, and the ones already restored). Press `h` again to show them. The popup shows the result, and the session reappears in the list. In a narrow window, `RESTORED` and then `DELETED` are left out.
+In the dashboard, press `t` to open the trash. It lists the same columns as `muxlair trash`, centered under their headers: `AGENT`, `ID` (the first 8 characters), `DELETED`, `RESTORABLE`, `RESTORED` and `NAME` (cut after 40 characters). Move with `↑` `↓`, and press `Enter` or `u` to restore the selected entry. `RESTORABLE` is `yes`, `no` (the session file was already gone when it was deleted, see below) or `done` (the entry was already restored), and `RESTORED` shows when. When some entries can't be restored, the popup tells you how many and reminds you that `h` hides them (the `no` and `done` ones). Press `h` again to show them. The popup shows the result, and the session reappears in the list. In a narrow window, `RESTORED` and then `DELETED` are left out.
 
 From the command line:
 
@@ -181,7 +181,7 @@ Either way, the session reappears in `muxlair` within a few seconds, and `muxlai
 - **Codex limits:**
   - Codex also keeps the turns of newer sessions in its own history database, which `muxlair` can't write back. `muxlair restore` checks that every completed turn in the saved history is in the session file, and prints a warning if some are missing. The check is a heuristic: it doesn't look at failed or interrupted turns, or at each message. The full history stays in the trash entry (`history.jsonl`).
   - Details Codex stores only in its database, such as token counts, may not come back.
-  - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column.
+  - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column. An entry that was already restored shows `done` there, in the popup and in `muxlair trash`.
 
 ## Configuration
 
