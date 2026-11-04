@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/phr0nak/muxlair/actions/workflows/ci.yml/badge.svg)](https://github.com/phr0nak/muxlair/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Go version](https://img.shields.io/github/go-mod/go-version/phr0nak/muxlair)](go.mod)
-[![Latest tag](https://img.shields.io/github/v/tag/phr0nak/muxlair?sort=semver)](https://github.com/phr0nak/muxlair/tags)
+[![Go version](https://img.shields.io/github/go-mod/go-version/phr0nak/muxlair?filename=go.mod)](go.mod)
+[![Latest tag](https://img.shields.io/github/v/tag/phr0nak/muxlair?sort=semver&style=flat)](https://github.com/phr0nak/muxlair/tags)
 
 ![muxlair listing Claude Code and Codex sessions grouped by folder, with a details pane](docs/screenshot.png)
 
