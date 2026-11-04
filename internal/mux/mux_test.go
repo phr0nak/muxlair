@@ -58,6 +58,53 @@ func TestPromptEmpty(t *testing.T) {
 	}
 }
 
+// tmux capture -e: a fresh Claude session's example prompt is dim, a draft is plain.
+func TestPromptEmptyStyled(t *testing.T) {
+	rule := "\x1b[38;5;244m────────────\x1b[0m"
+	screen := func(prompt string) string { return "out\n" + rule + "\n" + prompt + "\n" + rule + "\nstatus" }
+	for name, c := range map[string]struct {
+		prompt string
+		want   bool
+	}{
+		"dim placeholder":            {"\x1b[39m❯ \x1b[2mTry \"how do I log an error?\"\x1b[0m", true},
+		"dim, combined params":       {"\x1b[0m❯ \x1b[2;39mTry it\x1b[0m", true},
+		"dim, 256-color number is 2": {"\x1b[2m\x1b[38;5;2m❯ \x1b[0m\x1b[2m\x1b[38;5;2mTry\x1b[0m", true}, // 38;5;2 is a color, not dim
+		"no text":                    {"\x1b[39m❯ \x1b[0m", true},
+		"plain draft":                {"\x1b[39m❯ hello", false},
+		"plain then dim":             {"\x1b[39m❯ hello \x1b[2mmore\x1b[0m", false},
+		"dim then plain":             {"\x1b[39m❯ \x1b[2mTry\x1b[0m x", false},
+		"dim reset by 22":            {"\x1b[39m❯ \x1b[2mTry\x1b[22m x", false},
+		"reset by bare m":            {"\x1b[39m❯ \x1b[2mTry\x1b[m x", false},
+		"gray color is not dim":      {"\x1b[39m❯ \x1b[90mTry\x1b[0m", false},
+		"unknown escape":             {"\x1b[39m❯ \x1b[2m\x1b[?25hTry\x1b[0m", false},
+		"unstyled text":              {"❯ Try \"how do I log an error?\"", false},
+	} {
+		if got := promptEmpty(screen(c.prompt)); got != c.want {
+			t.Errorf("%s: got %v", name, got)
+		}
+	}
+	// A dim example prompt that wraps in a narrow pane; a draft that wraps does not count.
+	wrapped := "out\n" + rule + "\n\x1b[39m❯ \x1b[2mTry \"how do I\x1b[0m\n\x1b[2m  log an error?\"\x1b[0m\n" + rule
+	if !promptEmpty(wrapped) {
+		t.Error("a wrapped dim placeholder counts as a draft")
+	}
+	for name, s := range map[string]string{
+		"wrapped, plain tail": "out\n" + rule + "\n\x1b[39m❯ \x1b[2mTry\x1b[0m\n  typed text\n" + rule,
+		"wrapped, blank line": "out\n" + rule + "\n\x1b[39m❯ \x1b[2mTry\x1b[0m\n\n" + rule,
+		"wrapped, no rule":    "out\n" + rule + "\n\x1b[39m❯ \x1b[2mTry\x1b[0m\n\x1b[2m  more\x1b[0m",
+	} {
+		if promptEmpty(s) {
+			t.Errorf("%s counted as empty", name)
+		}
+	}
+	if !promptEmpty("out\n" + rule + "\n\x1b[39m❯ \x1b[2mTry\x1b[0m\n" + rule) {
+		t.Error("rule styling broke the structure check")
+	}
+	if promptEmpty("out\n" + rule + "\n\x1b[39m❯ \x1b[2mTry\x1b[0m\nsecond line\n" + rule) {
+		t.Error("a second line of text counts as a draft")
+	}
+}
+
 // A fake cmux on PATH records the calls cmuxRename makes.
 func TestCmuxRenameWorkspaceOnlyWhenAlone(t *testing.T) {
 	dir := t.TempDir()
