@@ -53,6 +53,10 @@ type fsMsg struct{}
 type statusMsg string
 type deletedMsg string
 type renamedMsg struct{ key, name, err, note string }
+type restoredMsg struct {
+	name, err string
+	notes     []string
+}
 type autoDeletedMsg struct {
 	deleted []string // "<agent> <session id>"
 	failed  []string // keys; not retried this run
@@ -116,6 +120,14 @@ const (
 	itemCancel = 5
 )
 
+// trashView is the "t" popup: the trash, with a way to restore from it.
+type trashView struct {
+	entries []agents.TrashEntry
+	cur     int
+	msg     string // result of the last restore
+	isErr   bool
+}
+
 // keyHelp is the "?" popup: every key and what it does.
 var keyHelp = [][2]string{
 	{"↑ ↓  j k", "move"},
@@ -131,6 +143,7 @@ var keyHelp = [][2]string{
 	{"< >", "resize details; dragging works too"},
 	{"mouse drag", "select details text; copied on release"},
 	{"R", "refresh"},
+	{"t", "trash: restore a deleted session"},
 	{"s", "settings"},
 	{"?", "this help"},
 	{"q  ctrl+c", "quit"},
@@ -145,6 +158,8 @@ type Model struct {
 	cfgPath     string
 	cfgEvents   chan struct{}
 	settings    *settingsForm
+	trash       *trashView // trash popup open
+	restoring   bool       // a restore is running (it outlives the popup, so only one at a time)
 	help        bool       // keys popup open
 	sel         *selection // text selected in the details pane
 	selecting   bool       // mouse button held while selecting
@@ -393,6 +408,28 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.reload()
 		}
 		return m, nil
+	case restoredMsg:
+		result := "restored " + msg.name
+		if msg.err != "" {
+			result = "restore failed: " + msg.err
+		}
+		for _, n := range msg.notes {
+			result += " · note: " + n
+		}
+		m.restoring = false
+		if t := m.trash; t != nil {
+			t.msg, t.isErr = result, msg.err != ""
+			if es, _ := agents.ListTrash(); msg.err == "" {
+				t.entries = es // a restored Claude entry leaves the trash; a Codex one is marked
+				t.cur = max(0, min(t.cur, len(es)-1))
+				if len(es) == 0 {
+					m.trash, m.status = nil, result
+				}
+			}
+		} else {
+			m.status = result
+		}
+		return m, m.reload() // the restored session shows up in the list
 	case renamedMsg:
 		delete(m.agentRename, msg.key)
 		if msg.err != "" {
@@ -439,6 +476,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // mouse: wheel moves the cursor, click selects, click on a header toggles it,
 // a second click on the same session within 400ms opens it.
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.trash != nil {
+		return m, nil // modal: keys only
+	}
 	if m.help {
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 			m.help = false // a click anywhere closes it
@@ -687,6 +727,108 @@ func (m Model) settingsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// trashKey handles keys while the trash popup is open.
+func (m Model) trashKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	t := m.trash
+	switch k.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc", "q", "t":
+		m.trash = nil
+	case "up", "k":
+		t.cur = max(0, t.cur-1)
+	case "down", "j":
+		t.cur = min(len(t.entries)-1, t.cur+1)
+	case "enter", "u":
+		e := t.entries[t.cur]
+		switch {
+		case m.restoring:
+			t.msg, t.isErr = "a restore is still running…", false
+		case e.Restored():
+			t.msg, t.isErr = "already restored (its backup stays in the trash)", true
+		case !e.Restorable():
+			t.msg, t.isErr = "can't be restored: its session file is missing, only readable history was saved", true
+		default:
+			m.restoring, t.msg, t.isErr = true, "restoring…", false
+			return m, restoreCmd(e)
+		}
+	}
+	return m, nil
+}
+
+// restoreCmd restores exactly e (not the newest entry for its session). Codex goes through its app
+// server, so it can take a few seconds.
+func restoreCmd(e agents.TrashEntry) tea.Cmd {
+	return func() tea.Msg {
+		notes, err := agents.RestoreEntry(e)
+		msg := restoredMsg{name: e.Meta.Name, notes: notes}
+		if err != nil {
+			msg.err = err.Error()
+		}
+		return msg
+	}
+}
+
+// trashPopup draws the trash list: one entry per line, the current one marked,
+// then the result of the last restore. The date column goes first when the
+// popup is narrow.
+func (m Model) trashPopup(w int) []string {
+	t, in := m.trash, w-4
+	room := max(1, m.boxHeight()-6) // borders, header, blank and message lines
+	top := max(0, t.cur-room+1)
+	const dateW = 11 + 1
+	fixed := 2 + 6 + 1 + 8 + 1 + 4 + 1 // gutter, agent, id, state, gaps
+	date := in >= fixed+dateW+10       // keep at least 10 cells for the name
+	if date {
+		fixed += dateW
+	}
+	row := func(agent, id, deleted, state, name string) string {
+		if date {
+			return fmt.Sprintf("%-6s %-8s %-11s %-4s %s", agent, id, deleted, state, name)
+		}
+		return fmt.Sprintf("%-6s %-8s %-4s %s", agent, id, state, name)
+	}
+	head := colHead.Render("  " + row("AGENT", "ID", "DELETED", "OK", "NAME"))
+	body := []string{padTo(head, in, lipgloss.NewStyle())}
+	for i := top; i < len(t.entries) && i < top+room; i++ {
+		e := t.entries[i]
+		state := "yes"
+		switch {
+		case e.Restored():
+			state = "done"
+		case !e.Restorable():
+			state = "no"
+		}
+		id := e.Meta.ID
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		name := ansi.Truncate(oneLineName(e.Meta.Name), max(4, in-fixed), "…")
+		line := row(e.Meta.Agent, id, e.Meta.DeletedAt.Local().Format("01-02 15:04"), state, name)
+		if i == t.cur {
+			sel := lipgloss.NewStyle().Background(selBg)
+			line = sel.Render(padTo("› "+line, in, sel))
+		} else if state != "yes" {
+			line = dim.Render(padTo("  "+line, in, lipgloss.NewStyle()))
+		} else {
+			line = padTo("  "+line, in, lipgloss.NewStyle())
+		}
+		body = append(body, line)
+	}
+	msg := ""
+	switch {
+	case t.msg == "":
+	case t.isErr:
+		msg = errSty.Render(ansi.Truncate(t.msg, in, "…"))
+	default:
+		msg = dim.Render(ansi.Truncate(t.msg, in, "…"))
+	}
+	return box("Trash", w, append(body, "", msg))
+}
+
+// oneLineName flattens a session name so it fits on one popup line.
+func oneLineName(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 // change flips a toggle or steps the auto-delete choice by dir.
 func (f *settingsForm) change(dir int) {
 	switch f.cur {
@@ -746,6 +888,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.help, m.helpTop = false, 0 // any other key closes it
 		}
 		return m, nil
+	}
+	if m.trash != nil {
+		return m.trashKey(k)
 	}
 	if m.settings != nil {
 		return m.settingsKey(k)
@@ -861,6 +1006,22 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showDetails = !m.showDetails
 	case "s":
 		m.settings = &settingsForm{opts: m.opts}
+	case "t":
+		es, err := agents.ListTrash()
+		switch {
+		case len(es) == 0 && err != nil:
+			m.status = "trash: " + err.Error()
+		case len(es) == 0:
+			m.status = "the trash is empty"
+		default:
+			m.trash = &trashView{entries: es}
+			switch {
+			case m.restoring:
+				m.trash.msg = "a restore is still running…"
+			case err != nil:
+				m.trash.msg, m.trash.isErr = "some entries can't be read: "+err.Error(), true
+			}
+		}
 	case "?":
 		m.help = true
 	case "R":
@@ -1304,6 +1465,8 @@ func (m Model) View() string {
 	// Repeat the popup's actions here: in a short terminal the popup can be clipped.
 	case m.help:
 		foot = dim.Render("↑↓ scroll · any other key closes")
+	case m.trash != nil:
+		foot = dim.Render("↑↓ move · enter/u restore · esc close")
 	case m.settings != nil:
 		foot = dim.Render("↑↓ move · space/←→ change · enter on Save · ctrl+s save · esc cancel")
 	case m.confirm != nil:
@@ -1350,6 +1513,8 @@ func (m Model) popup() []string {
 	w := m.popupWidth()
 	in := w - 4
 	switch {
+	case m.trash != nil:
+		return m.trashPopup(w)
 	case m.help:
 		body, room := m.helpBody(w), m.helpRoom()
 		if len(body)+2 <= room {

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -695,5 +696,177 @@ func TestRenamedNoteShownInStatus(t *testing.T) {
 	nm, _ = m.Update(renamedMsg{key: "codex:x", name: "New"})
 	if st := nm.(Model).status; st != "renamed to New" {
 		t.Fatalf("status %q", st)
+	}
+}
+
+// putTrash writes a trash entry the way agents.Trash does; files maps a name in
+// the entry to the original path it came from.
+func putTrash(t *testing.T, agent, id, name string, at time.Time, files map[string]string) string {
+	t.Helper()
+	dir := filepath.Join(agents.TrashDir(), agent, at.Format("20060102-150405")+"-"+id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for f := range files {
+		os.WriteFile(filepath.Join(dir, f), []byte("x\n"), 0o600)
+	}
+	b, _ := json.Marshal(map[string]any{"agent": agent, "id": id, "name": name, "cwd": "/p", "deletedAt": at, "files": files})
+	os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o600)
+	return dir
+}
+
+func press(m tea.Model, k string) (Model, tea.Cmd) {
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+	return nm.(Model), cmd
+}
+
+func pressType(m tea.Model, ty tea.KeyType) (Model, tea.Cmd) {
+	nm, cmd := m.Update(tea.KeyMsg{Type: ty})
+	return nm.(Model), cmd
+}
+
+// "t" opens the trash, enter restores the selected entry, and an entry with
+// nothing to put back says so instead of trying.
+func TestTrashPopupRestoresAndExplains(t *testing.T) {
+	agents.Home = t.TempDir()
+	orig := filepath.Join(agents.Home, ".claude", "projects", "-p", "aaa.jsonl")
+	now := time.Now()
+	putTrash(t, "claude", "aaa", "Fix the bug", now, map[string]string{"0-aaa.jsonl": orig})
+	putTrash(t, "codex", "bbb", "Dead one", now.Add(-time.Hour), nil) // no session file
+
+	m := New(Options{}, "")
+	m.height, m.width = 30, 100
+	m, _ = press(m, "t")
+	if m.trash == nil || len(m.trash.entries) != 2 {
+		t.Fatalf("popup not open with 2 entries: %+v", m.trash)
+	}
+	v := m.View()
+	for _, want := range []string{"Trash", "Fix the bug", "Dead one", "enter/u restore"} {
+		if !strings.Contains(ansi.Strip(v), want) {
+			t.Fatalf("view lacks %q:\n%s", want, ansi.Strip(v))
+		}
+	}
+
+	// The dead codex entry (second line) can't be restored.
+	m, _ = press(m, "j")
+	m, cmd := pressType(m, tea.KeyEnter)
+	if cmd != nil || !m.trash.isErr || !strings.Contains(m.trash.msg, "can't be restored") {
+		t.Fatalf("dead entry: cmd=%v msg=%q", cmd != nil, m.trash.msg)
+	}
+
+	// The Claude entry (first line) is restored for real.
+	m, _ = press(m, "k")
+	m, cmd = pressType(m, tea.KeyEnter)
+	if cmd == nil || !m.restoring {
+		t.Fatal("restore did not start")
+	}
+	if _, again := pressType(m, tea.KeyEnter); again != nil {
+		t.Fatal("a second restore started while one was running")
+	}
+	nm, _ := m.Update(cmd())
+	m = nm.(Model)
+	if _, err := os.Stat(orig); err != nil {
+		t.Fatalf("transcript not back: %v", err)
+	}
+	if m.trash == nil || len(m.trash.entries) != 1 || m.trash.isErr || !strings.Contains(m.trash.msg, "restored Fix the bug") {
+		t.Fatalf("after restore: %+v", m.trash)
+	}
+
+	m, _ = pressType(m, tea.KeyEsc)
+	if m.trash != nil {
+		t.Fatal("esc did not close the popup")
+	}
+}
+
+// Restoring the last entry closes the popup and says so in the bottom bar.
+func TestTrashPopupClosesWhenEmpty(t *testing.T) {
+	agents.Home = t.TempDir()
+	orig := filepath.Join(agents.Home, ".claude", "projects", "-p", "aaa.jsonl")
+	putTrash(t, "claude", "aaa", "Only one", time.Now(), map[string]string{"0-aaa.jsonl": orig})
+	m := New(Options{}, "")
+	m.height, m.width = 30, 100
+	m, _ = press(m, "t")
+	m, cmd := pressType(m, tea.KeyEnter)
+	nm, _ := m.Update(cmd())
+	m = nm.(Model)
+	if m.trash != nil || !strings.Contains(m.status, "restored Only one") {
+		t.Fatalf("trash=%v status=%q", m.trash, m.status)
+	}
+}
+
+func TestTrashEmptyAndFailure(t *testing.T) {
+	agents.Home = t.TempDir()
+	m := New(Options{}, "")
+	m.height, m.width = 30, 100
+	m, _ = press(m, "t")
+	if m.trash != nil || m.status != "the trash is empty" {
+		t.Fatalf("empty trash: trash=%v status=%q", m.trash, m.status)
+	}
+
+	// A restore that fails (the destination already exists) keeps the popup and shows why.
+	orig := filepath.Join(agents.Home, ".claude", "projects", "-p", "aaa.jsonl")
+	putTrash(t, "claude", "aaa", "Taken", time.Now(), map[string]string{"0-aaa.jsonl": orig})
+	os.MkdirAll(filepath.Dir(orig), 0o700)
+	os.WriteFile(orig, []byte("new"), 0o600)
+	m, _ = press(m, "t")
+	m, cmd := pressType(m, tea.KeyEnter)
+	nm, _ := m.Update(cmd())
+	m = nm.(Model)
+	if m.trash == nil || !m.trash.isErr || !strings.Contains(m.trash.msg, "already exists") {
+		t.Fatalf("failed restore: %+v", m.trash)
+	}
+	if b, _ := os.ReadFile(orig); string(b) != "new" {
+		t.Fatal("overwrote the existing file")
+	}
+}
+
+// A restore outlives the popup: reopening it must not allow a second restore
+// to start, and the first one's result still lands.
+func TestTrashRestoreInFlightSurvivesReopen(t *testing.T) {
+	agents.Home = t.TempDir()
+	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
+	putTrash(t, "claude", "aaa", "First", time.Now(), map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
+	putTrash(t, "claude", "bbb", "Second", time.Now().Add(-time.Hour), map[string]string{"0-bbb.jsonl": filepath.Join(proj, "bbb.jsonl")})
+	m := New(Options{}, "")
+	m.height, m.width = 30, 100
+	m, _ = press(m, "t")
+	m, first := pressType(m, tea.KeyEnter) // starts restoring "First"
+	if first == nil || !m.restoring {
+		t.Fatal("restore did not start")
+	}
+	m, _ = pressType(m, tea.KeyEsc)
+	m, _ = press(m, "t") // reopen while it is still running
+	if !strings.Contains(m.trash.msg, "still running") {
+		t.Fatalf("reopened popup does not say a restore is running: %q", m.trash.msg)
+	}
+	m, _ = press(m, "j") // select "Second" and try to restore it as well
+	m, second := pressType(m, tea.KeyEnter)
+	if second != nil {
+		t.Fatal("a second restore started while the first was running")
+	}
+	nm, _ := m.Update(first()) // the first result arrives
+	m = nm.(Model)
+	if m.restoring || m.trash == nil || !strings.Contains(m.trash.msg, "restored First") {
+		t.Fatalf("restoring=%v trash=%+v", m.restoring, m.trash)
+	}
+}
+
+// At the narrowest supported window the rows must stay inside the popup.
+func TestTrashPopupFitsNarrowWindow(t *testing.T) {
+	agents.Home = t.TempDir()
+	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
+	putTrash(t, "claude", "aaaaaaaa-1111", "A fairly long session name for a narrow window", time.Now(), map[string]string{"0-a.jsonl": filepath.Join(proj, "a.jsonl")})
+	for _, width := range []int{44, 50, 60, 100} {
+		m := New(Options{}, "")
+		m.height, m.width = 20, width
+		m, _ = press(m, "t")
+		for i, line := range strings.Split(m.View(), "\n") {
+			if w := ansi.StringWidth(line); w > width {
+				t.Fatalf("width %d: line %d is %d cells wide:\n%s", width, i, w, ansi.Strip(line))
+			}
+		}
+		if !strings.Contains(ansi.Strip(m.View()), "A fairly") {
+			t.Fatalf("width %d: the name is not visible:\n%s", width, ansi.Strip(m.View()))
+		}
 	}
 }

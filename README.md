@@ -51,7 +51,7 @@ Note that `muxlair` cleans up some sessions on its own: runs started by scripts 
   - `Enter` on an open session takes you to its `tmux` window or `cmux` pane. On a closed one, it reopens the session in a new `tmux` window or `cmux` pane.
   - `w` on an open session takes you to its `cmux` workspace. On a closed one, it reopens the session in a new `cmux` workspace.
 - **Rename** with `r`. The new name is applied in the agent too. Renaming inside the agent, with `/rename`, updates `muxlair` right away, along with the title of its `tmux` window or `cmux` tab, and its `cmux` workspace when the session is the only terminal in it.
-- **Delete safely** with `d`. Sessions go to `~/.muxlair/trash`: Claude sessions are moved there whole, and Codex sessions are backed up there before Codex removes them. You can put them back with `muxlair restore`. See [The trash](#the-trash).
+- **Delete safely** with `d`. Sessions go to `~/.muxlair/trash`: Claude sessions are moved there whole, and Codex sessions are backed up there before Codex removes them. You can put them back from the dashboard (`t`) or with `muxlair restore`. See [The trash](#the-trash).
 - **Automatic cleanup** of sessions started by scripts or other agents. See [Automatic cleanup](#automatic-cleanup).
 - **Details pane** with the session's ID, folder, file location, start time, last activity, model, token usage and cost, when the agent records them.
 - **Mouse support.** Scroll, click, double-click to open, drag the divider to resize the details pane, and drag across text in the details pane to copy it, for example a session ID or a path.
@@ -108,6 +108,7 @@ Press `?` in `muxlair` to see these at any time.
 | `<` `>` | Resize the details pane (dragging the divider works too) |
 | Mouse drag in the details pane | Select text; it's copied to the clipboard when you release the button |
 | `R` | Refresh |
+| `t` | Trash: list deleted sessions and restore one (`Enter` or `u`, `Esc` closes) |
 | `s` | Settings |
 | `?` | Show all keys |
 | `q` or `Ctrl+C` | Quit |
@@ -163,12 +164,16 @@ Deleting a session, by hand or automatically, puts it in `~/.muxlair/trash/<agen
 
 ### Restoring a session
 
+In the dashboard, press `t` to open the trash. Move with `↑` `↓`, and press `Enter` or `u` to restore the selected entry. The `OK` column says whether it can be restored (`yes`), can't be (`no`, see below), or already was (`done`). The popup shows the result, and the session reappears in the list.
+
+From the command line:
+
 ```sh
 muxlair trash                      # list what is in the trash
 muxlair restore codex 01a1a25b-b0b4-7961-8617-061b3dd637b8
 ```
 
-The session reappears in `muxlair` within a few seconds, and `muxlair` never auto-deletes it again.
+Either way, the session reappears in `muxlair` within a few seconds, and `muxlair` never auto-deletes it again.
 
 - **Claude:** the files are moved back to where they were.
 - **Codex:** the session file is copied back, and then Codex itself picks it up (`muxlair` never writes Codex's database). The name is set again, and any helper sessions come back with it. The entry stays in the trash, marked as restored, because it holds the full backup.
@@ -228,7 +233,7 @@ EOF
   - **A new Claude session:** until it has had a message, its input box shows a suggestion, which counts as not empty. Send it a message first.
 - **Delete:** when you press `d`, the session goes to the trash, as described above.
 - **Automatic cleanup:** finished non-interactive runs go to the trash, as described in [Automatic cleanup](#automatic-cleanup).
-- **Restore:** `muxlair restore` puts a trashed session back, as described in [Restoring](#restoring-a-session).
+- **Restore:** `muxlair restore`, or `t` in the dashboard, puts a trashed session back, as described in [Restoring](#restoring-a-session).
 
 `muxlair`'s own files live in `~/.muxlair`: `config.json`, the `trash` folder, and `interactive.json` (with its lock file, `interactive.lock`), its list of non-interactive runs you resumed yourself, which it must never clean up.
 
