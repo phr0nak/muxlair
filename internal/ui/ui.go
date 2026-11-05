@@ -885,6 +885,9 @@ func (m Model) trashPopup() []string {
 	}
 	nameCol := max(4, in-used)
 	nameW := nameCol
+	if nameCol >= 20 {
+		nameW -= 4 // a margin before the border, like the gutter on the left
+	}
 	gap := strings.Repeat(" ", c.gap)
 	row := func(agent, id, deleted, restorable, restored, name string) string {
 		cells := []string{center(agent, c.agent), center(id, c.id)}

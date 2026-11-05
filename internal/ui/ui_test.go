@@ -985,8 +985,11 @@ func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 	if got := ansi.StringWidth(cut); got <= 40 || !strings.HasSuffix(cut, "…") {
 		t.Errorf("name is %d cells wide, want it to use the free width (more than 40) and end in an ellipsis: %q", got, cut)
 	}
-	if end := strings.Index(row[n:], "│"); end < 0 || ansi.StringWidth(strings.TrimRight(row[n:n+end], " ")) < ansi.StringWidth(row[n:n+end])-3 {
-		t.Errorf("a long name should reach the right edge of the popup: %q", row)
+	// ... and stops a few cells short of the border (4, plus the cell the ellipsis may leave).
+	if end := strings.Index(row[n:], "│"); end < 0 {
+		t.Errorf("no right border in %q", row)
+	} else if gap := ansi.StringWidth(row[n:n+end]) - ansi.StringWidth(strings.TrimRight(row[n:n+end], " ")); gap < 3 || gap > 6 {
+		t.Errorf("the long name ends %d cells before the border, want about 4: %q", gap, row)
 	}
 }
 

@@ -136,7 +136,7 @@ func listTrash() {
 		rows = append(rows, []string{e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Local().Format("2006-01-02 15:04"), e.State(), restored})
 	}
 	// NAME gets what the terminal leaves after the other columns (and their 2-cell
-	// gaps), between 10 and 100 cells; 100 when stdout is not a terminal.
+	// gaps) minus a 4-cell margin, between 10 and 100 cells; 100 when stdout is not a terminal.
 	fixed := 2 * len(rows[0])
 	for c := range rows[0] {
 		w := 0
@@ -147,7 +147,7 @@ func listTrash() {
 	}
 	nameW := 100
 	if ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ); err == nil && ws.Col > 0 {
-		nameW = min(100, max(10, int(ws.Col)-fixed))
+		nameW = min(100, max(10, int(ws.Col)-fixed-4)) // 4 cells short of the edge
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, strings.Join(rows[0], "\t")+"\tNAME")
