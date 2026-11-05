@@ -832,10 +832,8 @@ var (
 	trashCompact = trashLayout{agent: 6, id: 8, deleted: 11, restorable: 10, restored: 11, gap: 1} // narrow windows
 )
 
-const (
-	trashNameMax  = agents.TrashNameMax // longer names are cut here
-	trashMaxWidth = 130                 // the popup never grows past this
-)
+// The popup never grows past this; the name fills what the other columns leave.
+const trashMaxWidth = 130
 
 // trashWidth is the popup width: as wide as the window allows, up to trashMaxWidth.
 func (m Model) trashWidth() int {
@@ -886,7 +884,7 @@ func (m Model) trashPopup() []string {
 		used += c.restored + c.gap
 	}
 	nameCol := max(4, in-used)
-	nameW := min(trashNameMax, nameCol)
+	nameW := nameCol
 	gap := strings.Repeat(" ", c.gap)
 	row := func(agent, id, deleted, restorable, restored, name string) string {
 		cells := []string{center(agent, c.agent), center(id, c.id)}

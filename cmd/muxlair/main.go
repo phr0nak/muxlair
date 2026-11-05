@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 	"text/tabwriter"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/sys/unix"
 
 	"github.com/phr0nak/muxlair/internal/agents"
 	"github.com/phr0nak/muxlair/internal/config"
@@ -125,14 +127,32 @@ func listTrash() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err) // partial results still listed below
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "AGENT\tID\tDELETED\tRESTORABLE\tRESTORED\tNAME")
+	rows := [][]string{{"AGENT", "ID", "DELETED", "RESTORABLE", "RESTORED"}}
 	for _, e := range es {
 		restored := "-"
 		if e.Restored() {
 			restored = e.Meta.RestoredAt.Local().Format("2006-01-02 15:04")
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Local().Format("2006-01-02 15:04"), e.State(), restored, e.ShortName(agents.TrashNameMax))
+		rows = append(rows, []string{e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Local().Format("2006-01-02 15:04"), e.State(), restored})
+	}
+	// NAME gets what the terminal leaves after the other columns (and their 2-cell
+	// gaps), between 10 and 100 cells; 100 when stdout is not a terminal.
+	fixed := 2 * len(rows[0])
+	for c := range rows[0] {
+		w := 0
+		for _, r := range rows {
+			w = max(w, len(r[c]))
+		}
+		fixed += w
+	}
+	nameW := 100
+	if ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ); err == nil && ws.Col > 0 {
+		nameW = min(100, max(10, int(ws.Col)-fixed))
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, strings.Join(rows[0], "\t")+"\tNAME")
+	for i, e := range es {
+		fmt.Fprintln(w, strings.Join(rows[i+1], "\t")+"\t"+e.ShortName(nameW))
 	}
 	w.Flush()
 }

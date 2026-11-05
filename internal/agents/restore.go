@@ -37,9 +37,6 @@ func (e TrashEntry) Restorable() bool {
 	return len(e.Meta.Files) > 0
 }
 
-// TrashNameMax is how many cells of a name the trash listings show.
-const TrashNameMax = 40
-
 // ShortName is the entry's name for a one-line listing: control characters and
 // line breaks are dropped (they would break the columns), an empty name becomes
 // "(no name)", and a long one is cut to max cells with an ellipsis.

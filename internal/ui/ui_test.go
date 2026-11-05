@@ -977,14 +977,16 @@ func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 	if row, _ := find("aaaaaaaa"); !strings.Contains(row, "very long name") || !strings.Contains(row, "…") || strings.Contains(row, strings.Repeat("very long name ", 4)) {
 		t.Errorf("long name not cut: %q", row)
 	}
-	// The name is cut at 40 cells at most.
+	// The name fills the column (more than the 40 cells muxlair trash allows) and
+	// is cut with an ellipsis only at its end.
 	row, _ := find("aaaaaaaa")
 	n := strings.Index(row, "very long name")
-	cut := strings.TrimSpace(row[n:])
-	cut = strings.TrimSpace(strings.TrimSuffix(cut, "│"))
-	cut = strings.TrimSpace(strings.SplitN(cut, "│", 2)[0])
-	if got := ansi.StringWidth(cut); got > 40 {
-		t.Errorf("name is %d cells wide, want at most 40: %q", got, cut)
+	cut := strings.TrimSpace(strings.SplitN(row[n:], "│", 2)[0])
+	if got := ansi.StringWidth(cut); got <= 40 || !strings.HasSuffix(cut, "…") {
+		t.Errorf("name is %d cells wide, want it to use the free width (more than 40) and end in an ellipsis: %q", got, cut)
+	}
+	if end := strings.Index(row[n:], "│"); end < 0 || ansi.StringWidth(strings.TrimRight(row[n:n+end], " ")) < ansi.StringWidth(row[n:n+end])-3 {
+		t.Errorf("a long name should reach the right edge of the popup: %q", row)
 	}
 }
 
