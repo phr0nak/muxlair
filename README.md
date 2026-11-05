@@ -109,7 +109,7 @@ Press `?` in `muxlair` to see these at any time.
 | `<` `>` | Resize the details pane (dragging the divider works too) |
 | Mouse drag in the details pane | Select text; it's copied to the clipboard when you release the button |
 | `R` | Refresh |
-| `p` | Peek at the latest exchange of the selected session's conversation (`↑` `↓` scroll, `Esc` closes) |
+| `p` | Peek at the latest exchange of the selected session's conversation (`↑` `↓` or the wheel scroll, drag across text to copy it, `Esc` closes) |
 | `t` | Trash: list deleted sessions and restore one (`Enter`; `h` hides the ones that can't be restored; `Esc` closes) |
 | `s` | Settings |
 | `?` | Show all keys |
@@ -225,7 +225,7 @@ EOF
 
 ## Conversation peek
 
-With the details pane open, the selected session shows a **Latest exchange** block under its fields: your last prompt and the agent's answer to it, cut to fit. Press `p` to read both in full (`↑` `↓` scroll, `Esc` closes); a very long text is cut at 20,000 characters. It is the real text from the session's file, not a summary, and tool calls, tool output and reasoning are never shown. Control characters in the text are removed before it is drawn.
+With the details pane open, the selected session shows a **Latest exchange** block under its fields: your last prompt and the agent's answer to it, cut to fit. Press `p` to read both in full (`↑` `↓` or the mouse wheel scroll, `Esc` closes); a very long text is cut at 20,000 characters. Drag across the text to select it; when you release the button it is copied to the clipboard, with wrapped lines joined back into the paragraph they came from. Dragging past the top or bottom edge scrolls. It is the real text from the session's file, not a summary, and tool calls, tool output and reasoning are never shown. Control characters in the text are removed before it is drawn.
 
 - **Claude:** the last prompt you typed and the last text the agent wrote after it. A reply that was interrupted, or that stopped at a tool call, is marked "the reply stopped early"; a session that is still busy shows "working…". Subagent conversations, slash commands and Claude's own context messages are skipped.
 - **Codex:** the same, from the session file (the final answer; its progress notes only until the final answer arrives). Codex 0.166 is the version checked. A session whose file is gone (`dead`) shows nothing.

@@ -178,7 +178,7 @@ var keyHelp = [][2]string{
 	{"< >", "resize details; dragging works too"},
 	{"mouse drag", "select details text; copied on release"},
 	{"R", "refresh"},
-	{"p", "peek at the latest exchange of the conversation (esc closes)"},
+	{"p", "peek at the latest exchange of the conversation (drag to copy, esc closes)"},
 	{"t", "trash: restore a deleted session (h there hides the ones that can't be)"},
 	{"s", "settings"},
 	{"?", "this help"},
@@ -407,6 +407,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = fmt.Sprintf("copied %d characters (%s)", msg.n, msg.via)
 		}
+		if m.peek != nil {
+			m.peek.msg = m.status // the footer shows the popup's keys, so say it inside the popup
+		}
 	case configMsg:
 		opts, err := config.Load(m.cfgPath)
 		if err != nil {
@@ -523,8 +526,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // mouse: wheel moves the cursor, click selects, click on a header toggles it,
 // a second click on the same session within 400ms opens it.
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.trash != nil || m.peek != nil {
+	if m.trash != nil {
 		return m, nil // modal: keys only
+	}
+	if m.peek != nil {
+		return m.peekMouse(msg)
 	}
 	if m.help {
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
@@ -1637,7 +1643,7 @@ func (m Model) View() string {
 		}
 		foot = dim.Render(foot)
 	case m.peek != nil:
-		foot = dim.Render("↑↓ scroll · esc close")
+		foot = dim.Render("↑↓ scroll · drag to copy · esc close")
 	case m.settings != nil:
 		foot = dim.Render("↑↓ move · space/←→ change · enter on Save · ctrl+s save · esc cancel")
 	case m.confirm != nil:
