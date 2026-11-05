@@ -140,33 +140,33 @@ func TestParseClaudeDetails(t *testing.T) {
 {"type":"assistant","requestId":"r1","message":{"model":"m1","usage":{"input_tokens":10,"output_tokens":5}}}
 {"type":"assistant","requestId":"r2","message":{"model":"m2","usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":100}}}
 `), 0o600)
-	d, err := parseClaudeDetails(p)
+	d, err := parseClaudeDetails(p, false)
 	if err != nil || d.Model != "m2" || d.Total != 117 || d.HasCost || d.Started.Hour() != 11 {
 		t.Fatalf("usage fallback: %+v %v", d, err)
 	}
 	f, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(`{"type":"cost-state","totalCostUSD":1.5,"startTime":1793136669045,"modelUsage":{"a":{"inputTokens":3,"outputTokens":4,"cacheReadInputTokens":5,"cacheCreationInputTokens":6}}}` + "\n")
 	f.Close()
-	d, _ = parseClaudeDetails(p)
+	d, _ = parseClaudeDetails(p, false)
 	if !d.HasCost || d.Cost != 1.5 || d.Total != 18 || d.Split.Cache != 11 || d.Started.UnixMilli() != 1793136669045 {
 		t.Fatalf("cost-state: %+v", d)
 	}
 	f, _ = os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(`{"type":"assistant","requestId":"r3","message":{"model":"m3","usage":{"input_tokens":2,"output_tokens":2}}}` + "\n")
 	f.Close()
-	if d, _ = parseClaudeDetails(p); d.Total != 22 || d.Model != "m3" {
+	if d, _ = parseClaudeDetails(p, false); d.Total != 22 || d.Model != "m3" {
 		t.Fatalf("usage after snapshot: %+v", d)
 	}
 	f, _ = os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(`{"type":"system","subtype":"local_command","content":"<local-command-stdout>Set model to ` + "`Opus 5.5`" + ` and saved</local-command-stdout>"}` + "\n")
 	f.Close()
-	if d, _ = parseClaudeDetails(p); d.Model != "Opus 5.5" {
+	if d, _ = parseClaudeDetails(p, false); d.Model != "Opus 5.5" {
 		t.Fatalf("model switch: %q", d.Model)
 	}
 	f, _ = os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
 	f.WriteString(`{"type":"user","message":{"content":"Set model to ` + "`Fake`" + `"}}` + "\n")
 	f.Close()
-	if d, _ = parseClaudeDetails(p); d.Model != "Opus 5.5" {
+	if d, _ = parseClaudeDetails(p, false); d.Model != "Opus 5.5" {
 		t.Fatalf("quoted phrase changed model: %q", d.Model)
 	}
 }

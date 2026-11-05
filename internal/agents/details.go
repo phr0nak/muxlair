@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,6 +23,8 @@ type Details struct {
 	HasSplit bool
 	Cost     float64
 	HasCost  bool
+	// Peek is the latest exchange of the conversation; only read when asked for.
+	Peek Peek
 }
 
 type Tokens struct{ In, Out, Cache int64 }
@@ -41,6 +44,7 @@ type claudeCostState struct {
 var (
 	detailsMu    sync.Mutex
 	detailsCache = map[string]detailsEntry{}
+	peekGen      int // bumped when the peek cache is dropped, so a parse already running can't put its text back
 )
 
 type detailsEntry struct {
@@ -49,38 +53,59 @@ type detailsEntry struct {
 	d     Details
 }
 
+// DropPeekCache forgets every cached conversation text (the peek was turned off).
+func DropPeekCache() {
+	detailsMu.Lock()
+	defer detailsMu.Unlock()
+	peekGen++
+	for k := range detailsCache {
+		if strings.HasSuffix(k, "\x00peek") {
+			delete(detailsCache, k)
+		}
+	}
+}
+
 // SessionDetails reads the details for s. Claude transcripts are parsed in full,
-// so results are cached per file size and mtime.
-func SessionDetails(s Session) (Details, error) {
+// so results are cached per file size and mtime. peek also reads the latest
+// exchange of the conversation; when it is false no conversation text is read
+// or cached.
+func SessionDetails(s Session, peek bool) (Details, error) {
 	switch s.Agent {
 	case "claude":
 		if len(s.Files) == 0 {
 			return Details{}, errors.New("no transcript yet")
 		}
-		return claudeDetails(s.Files[0])
+		return claudeDetails(s.Files[0], peek)
 	case "codex":
-		return codexDetails(s)
+		return codexDetails(s, peek)
 	}
 	return Details{}, errors.New("details not supported for " + s.Agent)
 }
 
-func claudeDetails(path string) (Details, error) {
+func claudeDetails(path string, peek bool) (Details, error) {
 	st, err := os.Stat(path)
 	if err != nil {
 		return Details{}, err
 	}
+	key := path
+	if peek {
+		key += "\x00peek" // a different entry, so turning the peek off drops no cache and leaks no text
+	}
 	detailsMu.Lock()
-	if c, ok := detailsCache[path]; ok && c.size == st.Size() && c.mtime.Equal(st.ModTime()) {
+	if c, ok := detailsCache[key]; ok && c.size == st.Size() && c.mtime.Equal(st.ModTime()) {
 		detailsMu.Unlock()
 		return c.d, nil
 	}
+	gen := peekGen
 	detailsMu.Unlock()
-	d, err := parseClaudeDetails(path)
+	d, err := parseClaudeDetails(path, peek)
 	if err != nil {
 		return d, err
 	}
 	detailsMu.Lock()
-	detailsCache[path] = detailsEntry{st.Size(), st.ModTime(), d}
+	if !peek || gen == peekGen {
+		detailsCache[key] = detailsEntry{st.Size(), st.ModTime(), d}
+	}
 	detailsMu.Unlock()
 	return d, nil
 }
@@ -88,7 +113,7 @@ func claudeDetails(path string) (Details, error) {
 // parseClaudeDetails prefers Claude's own cost-state record (cost, start time,
 // per-model tokens). Without one it sums assistant message usage, deduplicated
 // by request id since a streamed reply is written more than once.
-func parseClaudeDetails(path string) (Details, error) {
+func parseClaudeDetails(path string, peek bool) (Details, error) {
 	d := Details{Location: path}
 	f, err := os.Open(path)
 	if err != nil {
@@ -104,6 +129,7 @@ func parseClaudeDetails(path string) (Details, error) {
 	byRequest := map[string]usage{}
 	after := map[string]usage{}    // requests after the last cost-state snapshot
 	var costState *claudeCostState // last one wins; its totals are cumulative
+	var pk Peek                    // the latest exchange, when peek is set
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 64<<20)
 	for sc.Scan() {
@@ -127,6 +153,25 @@ func parseClaudeDetails(path string) (Details, error) {
 				d.Model = r.Message.Model
 				byRequest[r.RequestID] = r.Message.Usage
 				after[r.RequestID] = r.Message.Usage
+				if peek { // a second decode, only when the conversation is wanted
+					var c struct {
+						IsSidechain bool `json:"isSidechain"`
+						Message     struct {
+							StopReason string          `json:"stop_reason"`
+							Content    json.RawMessage `json:"content"`
+						} `json:"message"`
+					}
+					if json.Unmarshal(line, &c) == nil && !c.IsSidechain {
+						pk.claudeAssistant(c.Message.Content, c.Message.StopReason)
+					}
+				}
+			}
+		case peek && bytes.Contains(line, []byte(`"type":"user"`)):
+			// Most user records are tool results, some with huge output: skip them
+			// before decoding. (In prompt text the quotes are escaped, so this
+			// only matches the block type.)
+			if !bytes.Contains(line, []byte(`"type":"tool_result"`)) {
+				pk.claudeUser(line)
 			}
 		}
 		// /model logs "Set model to `Opus 5.5`"; until the next reply that is the newest model.
@@ -174,12 +219,13 @@ func parseClaudeDetails(path string) (Details, error) {
 	}
 	d.HasSplit = true
 	d.Total = d.Split.In + d.Split.Out + d.Split.Cache
+	d.Peek = pk
 	return d, nil
 }
 
 // codexDetails reads the threads row; codex records a token total but no cost
 // and no in/out split.
-func codexDetails(s Session) (Details, error) {
+func codexDetails(s Session, peek bool) (Details, error) {
 	d := Details{Location: codexDB()}
 	if len(s.Files) > 0 {
 		d.Location = s.Files[0]
@@ -204,6 +250,12 @@ func codexDetails(s Session) (Details, error) {
 		}
 	}
 	d.Total = tokens.Int64 // codex stores only a total
+	// shortcut: a paginated thread's rollout is read as the current conversation
+	// (13 of 15 on Codex 0.166 matched the history database, none was behind it);
+	// upgrade to the thread_items rows if a stale rollout shows up.
+	if peek && len(s.Files) > 0 {
+		d.Peek = codexPeek(s.Files[0])
+	}
 	return d, nil
 }
 

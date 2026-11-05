@@ -67,6 +67,7 @@ type detailsMsg struct {
 	updated time.Time
 	d       agents.Details
 	err     string
+	peek    bool // the conversation peek setting the load ran under
 }
 type detailEntry struct {
 	loaded  time.Time
@@ -116,8 +117,8 @@ type settingsForm struct {
 }
 
 const (
-	itemSave   = 4
-	itemCancel = 5
+	itemSave   = 5
+	itemCancel = 6
 )
 
 // trashRow is a trash entry with what the popup shows about it, read once when
@@ -177,13 +178,14 @@ var keyHelp = [][2]string{
 	{"< >", "resize details; dragging works too"},
 	{"mouse drag", "select details text; copied on release"},
 	{"R", "refresh"},
+	{"p", "peek at the latest exchange of the conversation (esc closes)"},
 	{"t", "trash: restore a deleted session (h there hides the ones that can't be)"},
 	{"s", "settings"},
 	{"?", "this help"},
 	{"q  ctrl+c", "quit"},
 }
 
-var settingItems = []string{"Mouse support", "Tint opened tabs", "Details pane at start", "Auto-delete headless"}
+var settingItems = []string{"Mouse support", "Tint opened tabs", "Details pane at start", "Conversation peek", "Auto-delete headless"}
 
 // autoDeleteSteps are the choices offered for auto_delete_headless.
 var autoDeleteSteps = []time.Duration{0, time.Minute, 5 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour, 24 * time.Hour}
@@ -193,6 +195,7 @@ type Model struct {
 	cfgEvents   chan struct{}
 	settings    *settingsForm
 	trash       *trashView // trash popup open
+	peek        *peekView  // conversation popup open
 	restoring   bool       // a restore is running (it outlives the popup, so only one at a time)
 	help        bool       // keys popup open
 	sel         *selection // text selected in the details pane
@@ -353,8 +356,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // wantDetails loads details for the selected session when the pane shows and
 // they are missing or older than the session's last activity.
-func (m Model) wantDetails() tea.Cmd {
-	if _, dw := m.split(); dw == 0 {
+// While the conversation popup is open its session keeps loading, pane or not.
+func (m Model) wantDetails() tea.Cmd { return m.loadDetails(m.peek != nil) }
+
+// loadDetails is wantDetails; force also loads while the pane is hidden (the
+// conversation popup needs the details too).
+func (m Model) loadDetails(force bool) tea.Cmd {
+	if _, dw := m.split(); dw == 0 && !force {
 		return nil
 	}
 	r, ok := m.row()
@@ -368,9 +376,10 @@ func (m Model) wantDetails() tea.Cmd {
 		return nil
 	}
 	m.detailsBusy[k] = true
+	peek := m.opts.Peek
 	return func() tea.Msg {
-		d, err := agents.SessionDetails(s)
-		msg := detailsMsg{key: k, updated: s.Updated, d: d}
+		d, err := agents.SessionDetails(s, peek)
+		msg := detailsMsg{key: k, updated: s.Updated, d: d, peek: peek}
 		if err != nil {
 			msg.err = err.Error()
 		}
@@ -423,7 +432,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// New details reshuffle the pane's lines; a selection made on the old
 		// layout would copy a different field.
 		m.sel, m.selecting = nil, false
-		m.details[msg.key] = detailEntry{time.Now(), msg.updated, msg.d, msg.err}
+		// A load that ran under the other setting is dropped (and redone): it would
+		// either leave the peek blank after turning it on, or keep text after turning it off.
+		if msg.peek == m.opts.Peek {
+			m.details[msg.key] = detailEntry{time.Now(), msg.updated, msg.d, msg.err}
+		}
 	case autoDeletedMsg:
 		m.autoBusy = false
 		clear(m.autoKeys)
@@ -510,7 +523,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // mouse: wheel moves the cursor, click selects, click on a header toggles it,
 // a second click on the same session within 400ms opens it.
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.trash != nil {
+	if m.trash != nil || m.peek != nil {
 		return m, nil // modal: keys only
 	}
 	if m.help {
@@ -728,6 +741,12 @@ func (m *Model) applyOptions(opts Options) tea.Cmd {
 	if opts.Details != m.opts.Details {
 		m.showDetails = opts.Details
 	}
+	if opts.Peek != m.opts.Peek {
+		clear(m.details) // reloaded with or without the conversation text
+		if !opts.Peek {
+			agents.DropPeekCache()
+		}
+	}
 	m.opts = opts
 	return cmd
 }
@@ -835,8 +854,8 @@ var (
 // The popup never grows past this; the name fills what the other columns leave.
 const trashMaxWidth = 130
 
-// trashWidth is the popup width: as wide as the window allows, up to trashMaxWidth.
-func (m Model) trashWidth() int {
+// wideWidth is the popup width: as wide as the window allows, up to trashMaxWidth.
+func (m Model) wideWidth() int {
 	if m.width <= 0 {
 		return trashMaxWidth
 	}
@@ -866,7 +885,7 @@ func leftAlign(s string, w int) string {
 // narrow it uses tighter columns, and drops RESTORED and then DELETED, but
 // never the name's last 10 cells.
 func (m Model) trashPopup() []string {
-	t, w := m.trash, m.trashWidth()
+	t, w := m.trash, m.wideWidth()
 	in := w - 4
 	room := max(1, m.boxHeight()-6) // borders, header, blank and message lines
 	top := max(0, t.cur-room+1)
@@ -961,6 +980,8 @@ func (f *settingsForm) change(dir int) {
 	case 2:
 		f.opts.Details = !f.opts.Details
 	case 3:
+		f.opts.Peek = !f.opts.Peek
+	case 4:
 		steps := autoDeleteChoices(f.opts.AutoDelete)
 		for i, d := range steps {
 			if d == f.opts.AutoDelete {
@@ -1013,6 +1034,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.trash != nil {
 		return m.trashKey(k)
+	}
+	if m.peek != nil {
+		return m.peekKey(k)
 	}
 	if m.settings != nil {
 		return m.settingsKey(k)
@@ -1128,6 +1152,17 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showDetails = !m.showDetails
 	case "s":
 		m.settings = &settingsForm{opts: m.opts}
+	case "p":
+		r, ok := m.row()
+		switch {
+		case !m.opts.Peek:
+			m.status = "the conversation peek is off; turn it on in settings (s)"
+		case !ok || r.s == nil:
+			m.status = "select a session to peek at its conversation"
+		default:
+			m.peek = &peekView{key: r.s.Key()}
+			return m, m.loadDetails(true)
+		}
 	case "t":
 		es, err := agents.ListTrash()
 		switch {
@@ -1601,6 +1636,8 @@ func (m Model) View() string {
 			foot = "↑↓ move · enter restore · " + h + " · esc close"
 		}
 		foot = dim.Render(foot)
+	case m.peek != nil:
+		foot = dim.Render("↑↓ scroll · esc close")
 	case m.settings != nil:
 		foot = dim.Render("↑↓ move · space/←→ change · enter on Save · ctrl+s save · esc cancel")
 	case m.confirm != nil:
@@ -1649,6 +1686,8 @@ func (m Model) popup() []string {
 	switch {
 	case m.trash != nil:
 		return m.trashPopup()
+	case m.peek != nil:
+		return m.peekPopup()
 	case m.help:
 		body, room := m.helpBody(w), m.helpRoom()
 		if len(body)+2 <= room {
@@ -1668,7 +1707,7 @@ func (m Model) popup() []string {
 			}
 			return "[ ] off"
 		}
-		values := []string{onOff(f.opts.Mouse), onOff(f.opts.ColorTabs), onOff(f.opts.Details), "‹ " + config.FormatDuration(f.opts.AutoDelete) + " ›"}
+		values := []string{onOff(f.opts.Mouse), onOff(f.opts.ColorTabs), onOff(f.opts.Details), onOff(f.opts.Peek), "‹ " + config.FormatDuration(f.opts.AutoDelete) + " ›"}
 		var body []string
 		for i, name := range settingItems {
 			l := fmt.Sprintf("%-24s %s", name, values[i])
@@ -1891,6 +1930,8 @@ func (m Model) detailLines(w, n int) []string {
 		return out
 	}
 	var body []string
+	var pk *agents.Peek // the latest exchange, shown under the metrics when there is room
+	var pkBusy bool
 	r, ok := m.row()
 	switch {
 	case !ok:
@@ -1947,6 +1988,9 @@ func (m Model) detailLines(w, n int) []string {
 			)
 			body = append(body, pathLines("Folder", s.Cwd)...)
 			body = append(body, pathLines("Location", d.d.Location)...)
+			if m.opts.Peek && !d.d.Peek.Empty() {
+				pk, pkBusy = &d.d.Peek, s.Status == agents.Busy
+			}
 		}
 	}
 	// Wrap any other line too wide for the pane (a long name, a session ID in a
@@ -1964,6 +2008,9 @@ func (m Model) detailLines(w, n int) []string {
 		for _, r := range strings.Split(ansi.Hardwrap(rest, max(8, w-11), true), "\n") {
 			wrapped = append(wrapped, strings.Repeat(" ", 11)+r)
 		}
+	}
+	if pk != nil {
+		wrapped = append(wrapped, peekPane(label, *pk, pkBusy, w, n-len(wrapped))...)
 	}
 	for i := range lines {
 		if i < len(wrapped) {

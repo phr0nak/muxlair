@@ -2,5 +2,6 @@
   "mouse": true,
   "color_tabs": true,
   "details": true,
+  "conversation_peek": true,
   "auto_delete_headless": "10m"
 }

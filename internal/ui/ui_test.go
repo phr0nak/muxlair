@@ -275,6 +275,7 @@ func TestSettingsPopup(t *testing.T) {
 	key("down")
 	key("down")
 	key("down")
+	key("down")
 	key("right") // auto-delete 10m -> 30m
 	key("esc")
 	if m.settings != nil || !m.opts.Mouse {
@@ -285,6 +286,7 @@ func TestSettingsPopup(t *testing.T) {
 	}
 	key("s")
 	key(" ")
+	key("down")
 	key("down")
 	key("down")
 	key("down")
@@ -1231,5 +1233,157 @@ func TestRenameUnnamedStartsEmpty(t *testing.T) {
 	m = nm.(Model)
 	if m.editing == nil || m.editBuf != "" {
 		t.Fatalf("editing %v, buf %q", m.editing != nil, m.editBuf)
+	}
+}
+
+// peekFixture is a model with one Claude session whose details hold an exchange.
+func peekFixture(opts Options, pk agents.Peek, status agents.Status) Model {
+	m := New(opts, "")
+	m.height, m.width = 36, 120
+	s := agents.Session{Agent: "claude", ID: "id-1", Name: "n", Cwd: "/a", Updated: time.Now(), Status: status}
+	m.sessions = []agents.Session{s}
+	m.rebuild()
+	m.cur = 1
+	m.details[s.Key()] = detailEntry{loaded: time.Now(), updated: s.Updated, d: agents.Details{Location: "/a/t.jsonl", Peek: pk}}
+	return m
+}
+
+func paneText(m Model) string {
+	_, dw := m.split()
+	return ansi.Strip(strings.Join(m.detailsPane(dw), "\n"))
+}
+
+func TestPeekPane(t *testing.T) {
+	pk := agents.Peek{Prompt: "why is the build\nfailing on main?", Reply: "A flaky test. " + strings.Repeat("Details follow. ", 30), Done: true}
+	m := peekFixture(Options{Details: true, Peek: true}, pk, agents.Idle)
+	got := paneText(m)
+	for _, want := range []string{"Latest exchange", "You", "why is the build failing", "main?", "Agent", "A flaky test."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("a long reply should be cut with an ellipsis:\n%s", got)
+	}
+	_, dw := m.split()
+	for i, l := range m.detailsPane(dw) {
+		if ansi.StringWidth(l) > dw {
+			t.Errorf("line %d is wider than the pane: %q", i, ansi.Strip(l))
+		}
+	}
+
+	// Off: nothing about the conversation is drawn.
+	if got := paneText(peekFixture(Options{Details: true, Peek: false}, pk, agents.Idle)); strings.Contains(got, "Latest exchange") || strings.Contains(got, "flaky") {
+		t.Errorf("peek shown while off:\n%s", got)
+	}
+	// No room: the metrics win, and no half block is drawn.
+	short := peekFixture(Options{Details: true, Peek: true}, pk, agents.Idle)
+	short.height = 16
+	if got := paneText(short); strings.Contains(got, "Latest exchange") && !strings.Contains(got, "Agent  ") {
+		t.Errorf("half a block drawn:\n%s", got)
+	}
+	// States: working, stopped early.
+	if got := paneText(peekFixture(Options{Details: true, Peek: true}, agents.Peek{Prompt: "q"}, agents.Busy)); !strings.Contains(got, "working…") {
+		t.Errorf("busy without reply should say working:\n%s", got)
+	}
+	stopped := peekFixture(Options{Details: true, Peek: true}, agents.Peek{Prompt: "q", Reply: "partial"}, agents.Idle)
+	if got := paneText(stopped); !strings.Contains(got, "stopped early") {
+		t.Errorf("an unfinished reply on an idle session should say it stopped early:\n%s", got)
+	}
+	// ... and the heading stays inside a narrow pane.
+	stopped.width = 90
+	_, ndw := stopped.split()
+	for i, l := range stopped.detailsPane(ndw) {
+		if ansi.StringWidth(l) > ndw {
+			t.Errorf("line %d is wider than the %d-cell pane: %q", i, ndw, ansi.Strip(l))
+		}
+	}
+}
+
+func TestPeekPopup(t *testing.T) {
+	reply := strings.Repeat("A long paragraph of the reply that wraps over several lines. ", 150)
+	m := peekFixture(Options{Details: true, Peek: true}, agents.Peek{Prompt: "the question", Reply: reply, Done: true}, agents.Idle)
+	m, _ = press(m, "p")
+	if m.peek == nil {
+		t.Fatal("p did not open the conversation")
+	}
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "Conversation") || !strings.Contains(view, "the question") || !strings.Contains(view, "↑↓ scroll · esc close") {
+		t.Fatalf("popup:\n%s", view)
+	}
+	if !strings.Contains(view, " of ") {
+		t.Errorf("a long reply should show a position line:\n%s", view)
+	}
+	m, _ = press(m, "G")
+	if m.peek.top == 0 {
+		t.Error("G did not scroll to the end")
+	}
+	m, _ = press(m, "g")
+	if m.peek.top != 0 {
+		t.Error("g did not scroll back to the top")
+	}
+	// The popup is modal: a mouse click does nothing.
+	nm, _ := m.Update(tea.MouseMsg{X: 5, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if nm.(Model).peek == nil {
+		t.Error("a click closed the popup")
+	}
+	m, _ = press(m, "esc")
+	if m.peek != nil {
+		t.Error("esc did not close it")
+	}
+	// Off: p says so and opens nothing.
+	m = peekFixture(Options{Details: true, Peek: false}, agents.Peek{Prompt: "q"}, agents.Idle)
+	m, _ = press(m, "p")
+	if m.peek != nil || !strings.Contains(m.status, "off") {
+		t.Errorf("p while off: peek=%v status=%q", m.peek != nil, m.status)
+	}
+	// Nothing to show yet.
+	m = peekFixture(Options{Details: true, Peek: true}, agents.Peek{}, agents.Idle)
+	m, _ = press(m, "p")
+	if m.peek == nil || !strings.Contains(ansi.Strip(m.View()), "no conversation to show yet") {
+		t.Errorf("empty peek:\n%s", ansi.Strip(m.View()))
+	}
+}
+
+// Turning the setting off drops the text that was read.
+func TestPeekSettingOffDropsText(t *testing.T) {
+	m := peekFixture(Options{Details: true, Peek: true}, agents.Peek{Prompt: "q", Reply: "a", Done: true}, agents.Idle)
+	m.applyOptions(Options{Details: true, Peek: false})
+	if len(m.details) != 0 {
+		t.Fatalf("details kept: %+v", m.details)
+	}
+	// A load that was already running when it was turned off must not bring it back.
+	nm, _ := m.Update(detailsMsg{key: "claude:id-1", updated: time.Now(), peek: true, d: agents.Details{Peek: agents.Peek{Prompt: "late"}}})
+	if len(nm.(Model).details) != 0 {
+		t.Fatalf("a load started with the peek on was kept: %+v", nm.(Model).details)
+	}
+	// ... and the other way: a load started while it was off must not leave it blank once on.
+	m.applyOptions(Options{Details: true, Peek: true})
+	nm, _ = m.Update(detailsMsg{key: "claude:id-1", updated: time.Now(), peek: false})
+	if len(nm.(Model).details) != 0 {
+		t.Fatalf("a load started with the peek off was kept: %+v", nm.(Model).details)
+	}
+}
+
+func TestSettingsHasPeekToggle(t *testing.T) {
+	m := New(Options{Peek: true}, "")
+	m.height, m.width = 30, 100
+	m, _ = press(m, "s")
+	if !strings.Contains(ansi.Strip(m.View()), "Conversation peek") {
+		t.Fatalf("settings:\n%s", ansi.Strip(m.View()))
+	}
+}
+
+// With the details pane hidden, the open popup's session still reloads.
+func TestPeekPopupKeepsLoadingWithoutPane(t *testing.T) {
+	m := peekFixture(Options{Details: false, Peek: true}, agents.Peek{Prompt: "q"}, agents.Idle)
+	m.showDetails = false
+	if m.wantDetails() != nil {
+		t.Fatal("loaded details with the pane hidden and no popup")
+	}
+	delete(m.details, "claude:id-1") // force a load
+	m.peek = &peekView{key: "claude:id-1"}
+	if m.wantDetails() == nil {
+		t.Fatal("the open popup's session was not loaded")
 	}
 }

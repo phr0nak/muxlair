@@ -22,6 +22,12 @@ func TestLoad(t *testing.T) {
 	if o, _ = Load(write(`{"auto_delete_headless":"off","mouse":false}`)); o.AutoDelete != 0 || o.Mouse || !o.Details {
 		t.Fatalf("off: %+v", o)
 	}
+	if o, _ = Load(write(`{"conversation_peek":false}`)); o.Peek || !o.Details {
+		t.Fatalf("peek off: %+v", o)
+	}
+	if !Defaults().Peek {
+		t.Fatal("the conversation peek should be on by default")
+	}
 	if o, _ = Load(write(`{"auto_delete_headless":"90s"}`)); o.AutoDelete != 90*time.Second {
 		t.Fatalf("90s: %+v", o)
 	}
@@ -40,7 +46,7 @@ func TestLoad(t *testing.T) {
 func TestSaveRoundTripKeepsUnknownKeys(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	os.WriteFile(p, []byte(`{"future_option": 7, "mouse": true}`), 0o600)
-	want := Options{Mouse: false, ColorTabs: true, Details: false, AutoDelete: 90 * time.Minute}
+	want := Options{Mouse: false, ColorTabs: true, Details: false, Peek: false, AutoDelete: 90 * time.Minute}
 	if err := Save(p, want); err != nil {
 		t.Fatal(err)
 	}
