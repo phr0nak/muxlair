@@ -54,6 +54,7 @@ Note that `muxlair` cleans up some sessions on its own: runs started by scripts 
 - **Delete safely** with `d`. Sessions go to `~/.muxlair/trash`: Claude sessions are moved there whole, and Codex sessions are backed up there before Codex removes them. You can put them back from the dashboard (`t`) or with `muxlair restore`. See [The trash](#the-trash).
 - **Automatic cleanup** of sessions started by scripts or other agents. See [Automatic cleanup](#automatic-cleanup).
 - **Details pane** with the session's ID, folder, file location, start time, last activity, model, token usage and cost, when the agent records them.
+- **Conversation peek.** The details pane also shows the latest exchange of the conversation (your last prompt and the agent's answer), and `p` opens it in full. It is read from the session's own file, never summarized, and tool calls and reasoning are left out. See [Conversation peek](#conversation-peek).
 - **Mouse support.** Scroll, click, double-click to open, drag the divider to resize the details pane, and drag across text in the details pane to copy it, for example a session ID or a path.
 - **Settings** in the app (`s`) or in a config file at `~/.muxlair/config.json`, applied immediately.
 
@@ -108,6 +109,7 @@ Press `?` in `muxlair` to see these at any time.
 | `<` `>` | Resize the details pane (dragging the divider works too) |
 | Mouse drag in the details pane | Select text; it's copied to the clipboard when you release the button |
 | `R` | Refresh |
+| `p` | Peek at the latest exchange of the selected session's conversation (`↑` `↓` scroll, `Esc` closes) |
 | `t` | Trash: list deleted sessions and restore one (`Enter`; `h` hides the ones that can't be restored; `Esc` closes) |
 | `s` | Settings |
 | `?` | Show all keys |
@@ -203,6 +205,7 @@ cat > ~/.muxlair/config.json <<'EOF'
   "mouse": true,
   "color_tabs": true,
   "details": true,
+  "conversation_peek": true,
   "auto_delete_headless": "10m"
 }
 EOF
@@ -217,7 +220,17 @@ EOF
 | `mouse` | `true` | Mouse support. While it's on, text in the details pane is selected and copied by dragging; to select anything else on screen, most terminals need `Shift` held. |
 | `color_tabs` | `true` | Colors the `tmux` window tab or `cmux` workspace that `muxlair` opens with the agent's color. |
 | `details` | `true` | Shows the details pane at startup. The pane needs a window at least 90 columns wide. `i` still toggles it at any time. |
+| `conversation_peek` | `true` | Reads and shows the latest exchange of the conversation in the details pane and with `p`. When it is `false`, `muxlair` does not read any conversation text. See [Conversation peek](#conversation-peek). |
 | `auto_delete_headless` | `"10m"` | How long a finished non-interactive run stays before it's moved to the trash (see [Automatic cleanup](#automatic-cleanup)). Use a duration like `"30s"`, `"10m"` or `"2h"`, or `"off"` to turn cleanup off. |
+
+## Conversation peek
+
+With the details pane open, the selected session shows a **Latest exchange** block under its fields: your last prompt and the agent's answer to it, cut to fit. Press `p` to read both in full (`↑` `↓` scroll, `Esc` closes); a very long text is cut at 20,000 characters. It is the real text from the session's file, not a summary, and tool calls, tool output and reasoning are never shown. Control characters in the text are removed before it is drawn.
+
+- **Claude:** the last prompt you typed and the last text the agent wrote after it. A reply that was interrupted, or that stopped at a tool call, is marked "the reply stopped early"; a session that is still busy shows "working…". Subagent conversations, slash commands and Claude's own context messages are skipped.
+- **Codex:** the same, from the session file (the final answer; its progress notes only until the final answer arrives). Codex 0.166 is the version checked. A session whose file is gone (`dead`) shows nothing.
+- **Not shown** when there is no room in the pane, or when the session has no prompt yet.
+- **Privacy.** The text appears on your screen, so anyone who can see it can read your conversation. Set `conversation_peek` to `false` (or turn it off in Settings, `s`) and `muxlair` reads no conversation text at all.
 
 ## What `muxlair` reads and changes
 

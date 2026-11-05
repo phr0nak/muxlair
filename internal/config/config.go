@@ -15,13 +15,14 @@ type Options struct {
 	Mouse     bool // default on
 	ColorTabs bool // tint tabs/workspaces muxlair opens with the agent's color; default on
 	Details   bool // show the details pane at startup (i toggles it); default on
+	Peek      bool // show the latest exchange of the conversation in the details pane and with p; default on
 	// AutoDelete trashes headless sessions (claude -p, codex exec/review) once
 	// exited and idle this long; 0 disables. Default 10m.
 	AutoDelete time.Duration
 }
 
 func Defaults() Options {
-	return Options{Mouse: true, ColorTabs: true, Details: true, AutoDelete: 10 * time.Minute}
+	return Options{Mouse: true, ColorTabs: true, Details: true, Peek: true, AutoDelete: 10 * time.Minute}
 }
 
 // file is the on-disk shape; pointers tell "missing" from "false".
@@ -29,6 +30,7 @@ type file struct {
 	Mouse      *bool   `json:"mouse"`
 	ColorTabs  *bool   `json:"color_tabs"`
 	Details    *bool   `json:"details"`
+	Peek       *bool   `json:"conversation_peek"`
 	AutoDelete *string `json:"auto_delete_headless"`
 }
 
@@ -54,6 +56,7 @@ func Load(path string) (Options, error) {
 	set(&opts.Mouse, c.Mouse)
 	set(&opts.ColorTabs, c.ColorTabs)
 	set(&opts.Details, c.Details)
+	set(&opts.Peek, c.Peek)
 	if c.AutoDelete != nil {
 		d, err := ParseDuration(*c.AutoDelete)
 		if err != nil {
@@ -105,6 +108,7 @@ func Save(path string, opts Options) error {
 	m["mouse"] = opts.Mouse
 	m["color_tabs"] = opts.ColorTabs
 	m["details"] = opts.Details
+	m["conversation_peek"] = opts.Peek
 	m["auto_delete_headless"] = FormatDuration(opts.AutoDelete)
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
