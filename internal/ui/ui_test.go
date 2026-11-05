@@ -1308,7 +1308,7 @@ func TestPeekPopup(t *testing.T) {
 		t.Fatal("p did not open the conversation")
 	}
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "Conversation") || !strings.Contains(view, "the question") || !strings.Contains(view, "↑↓ scroll · esc close") {
+	if !strings.Contains(view, "Conversation") || !strings.Contains(view, "the question") || !strings.Contains(view, "↑↓ scroll · drag to copy · esc close") {
 		t.Fatalf("popup:\n%s", view)
 	}
 	if !strings.Contains(view, " of ") {
@@ -1406,5 +1406,188 @@ func TestPeekPopupKeepsLoadingWithoutPane(t *testing.T) {
 	m.peek = &peekView{key: "claude:id-1"}
 	if m.wantDetails() == nil {
 		t.Fatal("the open popup's session was not loaded")
+	}
+}
+
+func TestWrapLineKeepsEverything(t *testing.T) {
+	for _, in := range []string{
+		"", "short", "two words", "trailing  spaces   ", "  leading spaces",
+		strings.Repeat("a long sentence that wraps over lines ", 12),
+		strings.Repeat("x", 100), "ab " + strings.Repeat("y", 60) + " cd",
+		strings.Repeat("漢字 ", 40),
+	} {
+		for _, w := range []int{8, 20, 33} {
+			pieces := wrapLine(in, w)
+			if strings.Join(pieces, "") != in {
+				t.Errorf("width %d: pieces do not join back to %q: %q", w, in, pieces)
+			}
+			for _, p := range pieces {
+				if got := ansi.StringWidth(strings.TrimRight(p, " ")); got > w {
+					t.Errorf("width %d: piece is %d cells: %q", w, got, p)
+				}
+			}
+		}
+	}
+}
+
+// peekGeom is where the popup's text starts on screen.
+func peekGeom(m Model) (x0, y0 int) {
+	px, py := popupOrigin(m.width, m.boxHeight(), m.peekPopup())
+	return px + 2, py + 1
+}
+
+func mouseAt(m Model, act tea.MouseAction, btn tea.MouseButton, x, y int) (Model, tea.Cmd) {
+	nm, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Action: act, Button: btn})
+	return nm.(Model), cmd
+}
+
+func TestPeekDragSelectsAndCopiesParagraph(t *testing.T) {
+	reply := "First paragraph " + strings.Repeat("word ", 60) + "end one.\nSecond line."
+	m := peekFixture(Options{Details: true, Peek: true}, agents.Peek{Prompt: "the question", Reply: reply, Done: true}, agents.Idle)
+	m, _ = press(m, "p")
+	lines := m.peekLines(m.wideWidth() - 4)
+	var first, last int // body lines of the reply: from "Agent" + 1 to the end
+	for i, l := range lines {
+		if strings.HasPrefix(l.raw, "First paragraph") {
+			first = i
+		}
+		last = i
+	}
+	if first == 0 || last <= first+1 {
+		t.Fatalf("expected a wrapped reply, got %d lines from %d", len(lines), first)
+	}
+	x0, y0 := peekGeom(m)
+	// Press at the start of the paragraph, drag to the end of the last line, release.
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonLeft, x0+2, y0+first)
+	m, _ = mouseAt(m, tea.MouseActionMotion, tea.MouseButtonLeft, x0+60, y0+last)
+	m, cmd := mouseAt(m, tea.MouseActionRelease, tea.MouseButtonLeft, x0+60, y0+last)
+	if cmd == nil || m.peek.sel == nil {
+		t.Fatal("releasing a drag did not start a copy")
+	}
+	sel, ok := m.peekSelection()
+	if !ok {
+		t.Fatal("the selection was dropped")
+	}
+	got := peekSelectedText(lines, sel)
+	if !strings.HasPrefix(got, "First paragraph word word") || !strings.Contains(got, "end one.\nSecond line.") {
+		t.Fatalf("copied text:\n%q", got)
+	}
+	if strings.Contains(got, "\n") && strings.Count(got, "\n") != 1 {
+		t.Errorf("the wrapped paragraph was split by newlines: %q", got)
+	}
+	// A plain click selects nothing; a key other than the arrows clears a selection.
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonLeft, x0+2, y0+first)
+	m, cmd = mouseAt(m, tea.MouseActionRelease, tea.MouseButtonLeft, x0+2, y0+first)
+	if cmd != nil || m.peek.sel != nil {
+		t.Error("a click selected something")
+	}
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonLeft, x0+2, y0+first)
+	m, _ = mouseAt(m, tea.MouseActionMotion, tea.MouseButtonLeft, x0+9, y0+first)
+	m, _ = mouseAt(m, tea.MouseActionRelease, tea.MouseButtonLeft, x0+9, y0+first)
+	if m.peek.sel == nil {
+		t.Fatal("no selection")
+	}
+	m, _ = pressType(m, tea.KeyDown)
+	if m.peek.sel == nil {
+		t.Error("an arrow key cleared the selection")
+	}
+	m, _ = press(m, "x")
+	if m.peek.sel != nil {
+		t.Error("another key kept the selection")
+	}
+	// Clicking outside the text clears a selection and does not close the popup.
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonLeft, x0+2, y0+first)
+	m, _ = mouseAt(m, tea.MouseActionMotion, tea.MouseButtonLeft, x0+9, y0+first)
+	m, _ = mouseAt(m, tea.MouseActionRelease, tea.MouseButtonLeft, x0+9, y0+first)
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonLeft, 0, 0)
+	if m.peek == nil || m.peek.sel != nil {
+		t.Errorf("outside click: popup=%v sel=%v", m.peek != nil, m.peek != nil && m.peek.sel != nil)
+	}
+}
+
+func TestPeekWheelScrollsAndSelectionSurvivesReload(t *testing.T) {
+	reply := strings.Repeat("A long paragraph of the reply that wraps over several lines. ", 150)
+	m := peekFixture(Options{Details: true, Peek: true}, agents.Peek{Prompt: "q", Reply: reply, Done: true}, agents.Idle)
+	m, _ = press(m, "p")
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonWheelDown, 10, 10)
+	if m.peek.top != 3 {
+		t.Fatalf("wheel down: top=%d", m.peek.top)
+	}
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonWheelUp, 10, 10)
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonWheelUp, 10, 10)
+	if m.peek.top != 0 {
+		t.Fatalf("wheel up stops at the top: top=%d", m.peek.top)
+	}
+	x0, y0 := peekGeom(m)
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonLeft, x0+2, y0+3)
+	m, _ = mouseAt(m, tea.MouseActionMotion, tea.MouseButtonLeft, x0+20, y0+4)
+	m, _ = mouseAt(m, tea.MouseActionRelease, tea.MouseButtonLeft, x0+20, y0+4)
+	if _, ok := m.peekSelection(); !ok {
+		t.Fatal("no selection")
+	}
+	// The conversation changes under the selection (a reload): the selection is dropped.
+	k := "claude:id-1"
+	e := m.details[k]
+	e.d.Peek.Reply += " and a new sentence"
+	m.details[k] = e
+	if _, ok := m.peekSelection(); ok {
+		t.Error("a selection made on other text survived a reload")
+	}
+	// Dragging past the bottom edge scrolls.
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonLeft, x0+2, y0+3)
+	rows := min(len(m.peekLines(m.wideWidth()-4)), m.peekRoom())
+	m, _ = mouseAt(m, tea.MouseActionMotion, tea.MouseButtonLeft, x0+10, y0+rows+2)
+	if m.peek.top == 0 {
+		t.Error("dragging below the text did not scroll")
+	}
+}
+
+// A quick drag can release before any motion event arrives: the release position counts.
+// A reload during the drag cancels it instead of copying other text.
+func TestPeekDragReleasePositionAndReload(t *testing.T) {
+	reply := strings.Repeat("A long paragraph of the reply that wraps over several lines. ", 20)
+	m := peekFixture(Options{Details: true, Peek: true}, agents.Peek{Prompt: "q", Reply: reply, Done: true}, agents.Idle)
+	m, _ = press(m, "p")
+	x0, y0 := peekGeom(m)
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonLeft, x0+2, y0+4)
+	m, cmd := mouseAt(m, tea.MouseActionRelease, tea.MouseButtonLeft, x0+30, y0+5) // no motion in between
+	if cmd == nil || m.peek.sel == nil || m.peek.sel.y2 != m.peek.top+5 || m.peek.sel.x2 != 30 {
+		t.Fatalf("release position ignored: cmd=%v sel=%+v", cmd != nil, m.peek.sel)
+	}
+	m, _ = mouseAt(m, tea.MouseActionPress, tea.MouseButtonLeft, x0+2, y0+4)
+	e := m.details["claude:id-1"]
+	e.d.Peek.Reply += " changed"
+	m.details["claude:id-1"] = e
+	m, cmd = mouseAt(m, tea.MouseActionRelease, tea.MouseButtonLeft, x0+30, y0+5)
+	if cmd != nil || m.peek.sel != nil || m.peek.selecting {
+		t.Errorf("a drag over a reload still copied: cmd=%v sel=%v", cmd != nil, m.peek.sel)
+	}
+}
+
+// In a narrow popup the copy result wins over the scroll position, so a failure keeps its reason.
+func TestPeekCopyResultWinsInNarrowPopup(t *testing.T) {
+	reply := strings.Repeat("A long paragraph of the reply that wraps over several lines. ", 150)
+	m := peekFixture(Options{Details: true, Peek: true}, agents.Peek{Prompt: "q", Reply: reply, Done: true}, agents.Idle)
+	m.width = 50
+	m, _ = press(m, "p")
+	nm, _ := m.Update(copiedMsg{err: "no clipboard"})
+	m = nm.(Model)
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "copy failed: no clipboard") {
+		t.Errorf("the reason was cut:\n%s", v)
+	}
+}
+
+// The popup keeps its place when a copy result appears or goes, or the next drag would start a row off.
+func TestPeekPopupDoesNotMoveWithCopyResult(t *testing.T) {
+	m := peekFixture(Options{Details: true, Peek: true}, agents.Peek{Prompt: "q", Reply: "short", Done: true}, agents.Idle)
+	m, _ = press(m, "p")
+	x0, y0 := peekGeom(m)
+	nm, _ := m.Update(copiedMsg{n: 5, via: "test"})
+	m = nm.(Model)
+	if x1, y1 := peekGeom(m); x1 != x0 || y1 != y0 {
+		t.Fatalf("popup moved from (%d,%d) to (%d,%d) when the copy result appeared", x0, y0, x1, y1)
+	}
+	if !strings.Contains(ansi.Strip(m.View()), "copied 5 characters") {
+		t.Error("the copy result is not shown")
 	}
 }
