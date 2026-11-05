@@ -24,6 +24,8 @@ Usage:
   muxlair trash       list sessions in ~/.muxlair/trash
   muxlair restore <agent> <id>
                       put a trashed session back (agent: claude or codex)
+  muxlair export codex <id>
+                      print a deleted Codex session's saved history as markdown
   muxlair --version   print the version and exit
   muxlair --help      show this help
 
@@ -56,6 +58,18 @@ func main() {
 			return
 		case "trash":
 			listTrash()
+			return
+		case "export":
+			if len(os.Args) != 4 || os.Args[2] != "codex" {
+				fmt.Fprint(os.Stderr, "usage: muxlair export codex <session id>\n")
+				os.Exit(2)
+			}
+			md, err := agents.ExportCodex(os.Args[3])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "muxlair: export:", err)
+				os.Exit(1)
+			}
+			fmt.Print(md)
 			return
 		case "restore":
 			if len(os.Args) != 4 {

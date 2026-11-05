@@ -122,6 +122,7 @@ Press `?` in `muxlair` to see these at any time.
 | `muxlair list` (`--list`) | Prints every session as an aligned table and exits, without starting the dashboard. Useful for debugging or scripting. |
 | `muxlair trash` | Lists the sessions in `~/.muxlair/trash`, newest first. |
 | `muxlair restore <agent> <id>` | Puts a trashed session back. `<agent>` is `claude` or `codex`; take the ID from `muxlair trash`. See [Restoring](#restoring-a-session). |
+| `muxlair export codex <id>` | Prints a deleted Codex session's saved history as markdown, to read what a session that can't be restored said. It only prints and changes nothing; add `> file.md` to save it. See [Restoring](#restoring-a-session). |
 
 Any other argument prints the usage and exits with status 2.
 
@@ -176,7 +177,7 @@ The session reappears in `muxlair` within a few seconds, and `muxlair` never aut
 - **Codex limits:**
   - Codex also keeps the turns of newer sessions in its own history database, which `muxlair` can't write back. `muxlair restore` checks that every completed turn in the saved history is in the session file, and prints a warning if some are missing. The check is a heuristic: it doesn't look at failed or interrupted turns, or at each message. The full history stays in the trash entry (`history.jsonl`).
   - Details Codex stores only in its database, such as token counts, may not come back.
-  - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column.
+  - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column. You can still read it: `muxlair export codex <id> > session.md`. The command only prints the text to the terminal and writes no files; the redirect is what creates one. The export is partial: Codex may have lost some messages before the delete, and long command output is cut.
 
 ## Configuration
 
