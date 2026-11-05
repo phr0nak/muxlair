@@ -53,7 +53,6 @@ type Session struct {
 	Headless bool
 
 	historyDB bool // codex: turns live in thread_history sqlite (paginated mode)
-	titled    bool // claude: transcript has a custom or AI title
 }
 
 // Key identifies a session across refreshes.

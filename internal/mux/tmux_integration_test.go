@@ -73,6 +73,40 @@ func TestTmuxSendLine(t *testing.T) {
 	}
 }
 
+// A fresh Claude session shows a dim example prompt: it gets the line. The same
+// text as a plain draft is left alone.
+func TestTmuxSendLineClaudePlaceholder(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("no tmux")
+	}
+	sock := t.TempDir() + "/sock"
+	run := func(name, prompt string) (string, error) {
+		fake := `printf '────\n` + prompt + `\n────\n'; cat`
+		if out, err := exec.Command("tmux", "-S", sock, "new-session", "-d", "-s", name, fake).CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+		t.Setenv("TMUX", sock+",0,0")
+		time.Sleep(200 * time.Millisecond)
+		pane, _ := exec.Command("tmux", "display", "-p", "-t", name, "#{pane_id}").Output()
+		err := SendLine(Target{Mux: "tmux", Pane: strings.TrimSpace(string(pane))}, "claude", "/rename hello")
+		time.Sleep(200 * time.Millisecond)
+		out, _ := exec.Command("tmux", "capture-pane", "-p", "-t", name).Output()
+		return string(out), err
+	}
+	defer exec.Command("tmux", "-S", sock, "kill-server").Run()
+	out, err := run("fresh", `\033[39m❯ \033[2mTry something\033[0m`)
+	if err != nil && !strings.Contains(err.Error(), "did not clear") { // the fake never redraws its prompt
+		t.Fatalf("placeholder refused: %v", err)
+	}
+	if strings.Count(out, "/rename hello") != 2 {
+		t.Fatalf("pane:\n%s", out)
+	}
+	out, err = run("draft", `\033[39m❯ Try something`)
+	if err == nil || strings.Contains(out, "/rename hello") {
+		t.Fatalf("a plain draft was typed over (err %v):\n%s", err, out)
+	}
+}
+
 // Codex's empty prompt gets the line; a draft in its prompt is left alone.
 func TestTmuxSendLineCodex(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {

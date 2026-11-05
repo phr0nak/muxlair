@@ -137,7 +137,7 @@ Any other argument prints the usage and exits with status 2.
 | `TTY` | The terminal the session runs in, empty when it isn't running |
 | `MAYBELIVE` | `true` when an unidentified agent process may be using it (`in use?` in the dashboard) |
 | `CWD` | The folder the session ran in |
-| `NAME` | The session name |
+| `NAME` | The session name. A Claude session with no title and no prompt yet shows `(unnamed)`; the name Claude makes up from the folder (like `stuff-50`) is not shown |
 
 ## Automatic cleanup
 
@@ -222,11 +222,11 @@ EOF
 
 - **Rename:**
   - **A closed session:** a Claude session gets the same rename record `/rename` would write. A Codex session is renamed through Codex's own app server.
-  - **A running session:** `muxlair` types `/rename <name>` into its terminal (a `tmux` pane, or a `cmux` tab or workspace). It does this only when the session is idle and its input box is empty, so nothing you're typing gets sent. `muxlair` reads the screen to check.
+  - **A running session:** `muxlair` types `/rename <name>` into its terminal (a `tmux` pane, or a `cmux` tab or workspace). It does this only when the session is idle and its input box is empty, so nothing you're typing gets sent. In `tmux`, and for Codex in `cmux`, `muxlair` reads the screen to check; for Claude in `cmux`, `cmux` itself guards the input box.
   - **If it can't type:** the terminal isn't a `tmux` pane or `cmux` tab or workspace it can reach, the session is busy, or you have a draft in the input box.
     - A Codex session is still renamed through the app server. `muxlair` tells you the open session keeps its old name until you run `/rename` there or reopen it.
     - A Claude session is not renamed. Run `/rename` there yourself.
-  - **A new Claude session:** until it has had a message, its input box shows a suggestion, which counts as not empty. Send it a message first.
+  - **A new Claude session:** its empty input box shows a dimmed example prompt. `muxlair` treats a prompt that is entirely dimmed text as empty, so a new session can be renamed before its first message. Until it has a title or a prompt, it shows as `(unnamed)` in the list, not the name Claude makes up from the folder. A new Codex session only appears in the list after its first message, because Codex creates it then. Anything typed there is normal text, so a draft still blocks the rename.
 - **Delete:** when you press `d`, the session goes to the trash, as described above.
 - **Automatic cleanup:** finished non-interactive runs go to the trash, as described in [Automatic cleanup](#automatic-cleanup).
 - **Restore:** `muxlair restore` puts a trashed session back, as described in [Restoring](#restoring-a-session).

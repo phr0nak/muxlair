@@ -876,6 +876,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			s := *r.s
 			m.editing, m.editBuf = &s, s.Name
+			if s.Name == agents.Unnamed {
+				m.editBuf = "" // the placeholder is not a name to edit
+			}
 		}
 	case "enter":
 		return m, m.open(false)
