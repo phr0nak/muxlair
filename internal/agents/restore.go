@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TrashEntry is one deleted session in ~/.muxlair/trash.
@@ -33,6 +35,20 @@ func (e TrashEntry) Restorable() bool {
 		}
 	}
 	return len(e.Meta.Files) > 0
+}
+
+// TrashNameMax is how many cells of a name the trash listings show.
+const TrashNameMax = 40
+
+// ShortName is the entry's name for a one-line listing: control characters and
+// line breaks are dropped (they would break the columns), an empty name becomes
+// "(no name)", and a long one is cut to max cells with an ellipsis.
+func (e TrashEntry) ShortName(max int) string {
+	n := safeLine(e.Meta.Name)
+	if n == "" {
+		n = "(no name)"
+	}
+	return ansi.Truncate(n, max, "…")
 }
 
 // State is what the RESTORABLE column shows, in the dashboard's trash popup and

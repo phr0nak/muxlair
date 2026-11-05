@@ -958,13 +958,18 @@ func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 		}
 		near("RESTORABLE", id, mid(r1, r2), hmid["RESTORABLE"])
 	}
-	// The agent value is centered under AGENT, and the name under NAME.
+	// The agent value is centered under AGENT; every name starts where NAME does (left-aligned).
 	{
 		row, _ := find("bbbbbbbb")
 		a := strings.Index(row, "claude")
 		near("AGENT", "bbbbbbbb", mid(ansi.StringWidth(row[:a]), ansi.StringWidth(row[:a])+len("claude")), hmid["AGENT"])
-		n := strings.Index(row, "(no name)")
-		near("NAME", "bbbbbbbb", mid(ansi.StringWidth(row[:n]), ansi.StringWidth(row[:n])+len("(no name)")), hmid["NAME"])
+		nameCol := ansi.StringWidth(head[:strings.Index(head, "NAME")])
+		for id, name := range map[string]string{"aaaaaaaa": "very long name", "bbbbbbbb": "(no name)", "cccccccc": "Dead one", "dddddddd": "Was restored"} {
+			r, _ := find(id)
+			if got := ansi.StringWidth(r[:strings.Index(r, name)]); got != nameCol {
+				t.Errorf("name of %s starts at column %d, NAME header at %d", id, got, nameCol)
+			}
+		}
 	}
 	if row, _ := find("dddddddd"); strings.Contains(row, " - ") {
 		t.Errorf("the restored entry should show its restore date, not -: %q", row)

@@ -132,7 +132,7 @@ func listTrash() {
 		if e.Restored() {
 			restored = e.Meta.RestoredAt.Local().Format("2006-01-02 15:04")
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Local().Format("2006-01-02 15:04"), e.State(), restored, e.Meta.Name)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Meta.Agent, e.Meta.ID, e.Meta.DeletedAt.Local().Format("2006-01-02 15:04"), e.State(), restored, e.ShortName(agents.TrashNameMax))
 	}
 	w.Flush()
 }
