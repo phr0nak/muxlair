@@ -1314,13 +1314,34 @@ func TestPeekPopup(t *testing.T) {
 	if !strings.Contains(view, " of ") {
 		t.Errorf("a long reply should show a position line:\n%s", view)
 	}
-	m, _ = press(m, "G")
-	if m.peek.top == 0 {
-		t.Error("G did not scroll to the end")
+	// Only the arrow keys scroll; nothing else does.
+	for _, k := range []string{"j", "k", "G", "g", " "} {
+		if m, _ = press(m, k); m.peek == nil || m.peek.top != 0 {
+			t.Fatalf("%q scrolled the popup", k)
+		}
 	}
-	m, _ = press(m, "g")
+	for _, ty := range []tea.KeyType{tea.KeyPgDown, tea.KeyEnd, tea.KeyCtrlD} {
+		if m, _ = pressType(m, ty); m.peek == nil || m.peek.top != 0 {
+			t.Fatalf("key %v scrolled the popup", ty)
+		}
+	}
+	m, _ = pressType(m, tea.KeyDown)
+	if m.peek.top != 1 {
+		t.Errorf("down did not scroll: top=%d", m.peek.top)
+	}
+	m, _ = pressType(m, tea.KeyUp)
 	if m.peek.top != 0 {
-		t.Error("g did not scroll back to the top")
+		t.Errorf("up did not scroll back: top=%d", m.peek.top)
+	}
+	m, _ = pressType(m, tea.KeyUp)
+	if m.peek.top != 0 {
+		t.Errorf("up scrolled past the top: top=%d", m.peek.top)
+	}
+	for i := 0; i < 500; i++ {
+		m, _ = pressType(m, tea.KeyDown)
+	}
+	if m.peek.top == 0 || m.peek.top >= 500 {
+		t.Errorf("down should stop at the end: top=%d", m.peek.top)
 	}
 	// The popup is modal: a mouse click does nothing.
 	nm, _ := m.Update(tea.MouseMsg{X: 5, Y: 5, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})

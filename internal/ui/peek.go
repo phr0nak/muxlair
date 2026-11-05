@@ -144,24 +144,15 @@ func (m Model) peekPopup() []string {
 func (m Model) peekKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	v := m.peek
 	maxTop := max(0, len(m.peekBody(m.wideWidth()-4))-m.peekRoom())
-	half := max(1, m.peekRoom()/2)
 	switch k.String() {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "q", "p":
 		m.peek = nil
-	case "up", "k":
+	case "up":
 		v.top = max(0, v.top-1)
-	case "down", "j":
+	case "down":
 		v.top = min(maxTop, v.top+1)
-	case "pgup", "ctrl+u":
-		v.top = max(0, v.top-half)
-	case "pgdown", "ctrl+d", " ":
-		v.top = min(maxTop, v.top+half)
-	case "home", "g":
-		v.top = 0
-	case "end", "G":
-		v.top = maxTop
 	}
 	return m, nil
 }
