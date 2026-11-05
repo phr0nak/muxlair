@@ -341,3 +341,26 @@ func TestTrashEntryState(t *testing.T) {
 		}
 	}
 }
+
+// The trash listings put NAME on one line: control characters and line breaks
+// go, an empty name is "(no name)", and a long one is cut to the given width.
+func TestTrashEntryShortName(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		max  int
+		want string
+	}{
+		{"", 40, "(no name)"},
+		{" \t\n ", 40, "(no name)"},
+		{"fix\nthe\tbug\x1b[31m!", 40, "fix the bug[31m!"},
+		{strings.Repeat("x", 100), 40, strings.Repeat("x", 39) + "…"},
+		{"short", 40, "short"},
+		{strings.Repeat("漢", 30), 10, strings.Repeat("漢", 4) + "…"}, // wide: 2 cells each
+		{"toolong", 5, "tool…"},
+	} {
+		e := TrashEntry{Meta: trashMeta{Name: c.name}}
+		if got := e.ShortName(c.max); got != c.want {
+			t.Errorf("%q (%d): got %q, want %q", c.name, c.max, got, c.want)
+		}
+	}
+}

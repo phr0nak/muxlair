@@ -832,10 +832,8 @@ var (
 	trashCompact = trashLayout{agent: 6, id: 8, deleted: 11, restorable: 10, restored: 11, gap: 1} // narrow windows
 )
 
-const (
-	trashNameMax  = 40  // longer names are cut here
-	trashMaxWidth = 130 // the popup never grows past this
-)
+// The popup never grows past this; the name fills what the other columns leave.
+const trashMaxWidth = 130
 
 // trashWidth is the popup width: as wide as the window allows, up to trashMaxWidth.
 func (m Model) trashWidth() int {
@@ -853,6 +851,14 @@ func center(s string, w int) string {
 	}
 	left := (w - n) / 2
 	return strings.Repeat(" ", left) + s + strings.Repeat(" ", w-n-left)
+}
+
+// leftAlign pads s on the right to w cells.
+func leftAlign(s string, w int) string {
+	if n := ansi.StringWidth(s); n < w {
+		return s + strings.Repeat(" ", w-n)
+	}
+	return s
 }
 
 // trashPopup draws the trash list: a header, then one entry per line with the
@@ -878,7 +884,10 @@ func (m Model) trashPopup() []string {
 		used += c.restored + c.gap
 	}
 	nameCol := max(4, in-used)
-	nameW := min(trashNameMax, nameCol)
+	nameW := nameCol
+	if nameCol >= 20 {
+		nameW -= 4 // a margin before the border, like the gutter on the left
+	}
 	gap := strings.Repeat(" ", c.gap)
 	row := func(agent, id, deleted, restorable, restored, name string) string {
 		cells := []string{center(agent, c.agent), center(id, c.id)}
@@ -889,7 +898,7 @@ func (m Model) trashPopup() []string {
 		if showRestored {
 			cells = append(cells, center(restored, c.restored))
 		}
-		return strings.Join(cells, gap) + gap + center(name, nameCol)
+		return strings.Join(cells, gap) + gap + leftAlign(name, nameCol) // NAME is left-aligned: names differ in length
 	}
 	head := colHead.Render("  " + row("AGENT", "ID", "DELETED", "RESTORABLE", "RESTORED", "NAME"))
 	body := []string{padTo(head, in, lipgloss.NewStyle())}
@@ -907,11 +916,7 @@ func (m Model) trashPopup() []string {
 		if len(id) > 8 {
 			id = id[:8]
 		}
-		name := oneLineName(e.Meta.Name)
-		if name == "" {
-			name = "(no name)"
-		}
-		name = ansi.Truncate(name, nameW, "…")
+		name := e.ShortName(nameW)
 		line := row(e.Meta.Agent, id, e.Meta.DeletedAt.Local().Format("01-02 15:04"), e.state, restored, name)
 		switch {
 		case i == t.cur:
@@ -945,9 +950,6 @@ func (m Model) trashPopup() []string {
 	}
 	return box("Trash", w, append(body, "", msg))
 }
-
-// oneLineName flattens a session name so it fits on one popup line.
-func oneLineName(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // change flips a toggle or steps the auto-delete choice by dir.
 func (f *settingsForm) change(dir int) {

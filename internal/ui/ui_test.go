@@ -958,13 +958,18 @@ func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 		}
 		near("RESTORABLE", id, mid(r1, r2), hmid["RESTORABLE"])
 	}
-	// The agent value is centered under AGENT, and the name under NAME.
+	// The agent value is centered under AGENT; every name starts where NAME does (left-aligned).
 	{
 		row, _ := find("bbbbbbbb")
 		a := strings.Index(row, "claude")
 		near("AGENT", "bbbbbbbb", mid(ansi.StringWidth(row[:a]), ansi.StringWidth(row[:a])+len("claude")), hmid["AGENT"])
-		n := strings.Index(row, "(no name)")
-		near("NAME", "bbbbbbbb", mid(ansi.StringWidth(row[:n]), ansi.StringWidth(row[:n])+len("(no name)")), hmid["NAME"])
+		nameCol := ansi.StringWidth(head[:strings.Index(head, "NAME")])
+		for id, name := range map[string]string{"aaaaaaaa": "very long name", "bbbbbbbb": "(no name)", "cccccccc": "Dead one", "dddddddd": "Was restored"} {
+			r, _ := find(id)
+			if got := ansi.StringWidth(r[:strings.Index(r, name)]); got != nameCol {
+				t.Errorf("name of %s starts at column %d, NAME header at %d", id, got, nameCol)
+			}
+		}
 	}
 	if row, _ := find("dddddddd"); strings.Contains(row, " - ") {
 		t.Errorf("the restored entry should show its restore date, not -: %q", row)
@@ -972,14 +977,19 @@ func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
 	if row, _ := find("aaaaaaaa"); !strings.Contains(row, "very long name") || !strings.Contains(row, "…") || strings.Contains(row, strings.Repeat("very long name ", 4)) {
 		t.Errorf("long name not cut: %q", row)
 	}
-	// The name is cut at 40 cells at most.
+	// The name fills the column (more than the 40 cells muxlair trash allows) and
+	// is cut with an ellipsis only at its end.
 	row, _ := find("aaaaaaaa")
 	n := strings.Index(row, "very long name")
-	cut := strings.TrimSpace(row[n:])
-	cut = strings.TrimSpace(strings.TrimSuffix(cut, "│"))
-	cut = strings.TrimSpace(strings.SplitN(cut, "│", 2)[0])
-	if got := ansi.StringWidth(cut); got > 40 {
-		t.Errorf("name is %d cells wide, want at most 40: %q", got, cut)
+	cut := strings.TrimSpace(strings.SplitN(row[n:], "│", 2)[0])
+	if got := ansi.StringWidth(cut); got <= 40 || !strings.HasSuffix(cut, "…") {
+		t.Errorf("name is %d cells wide, want it to use the free width (more than 40) and end in an ellipsis: %q", got, cut)
+	}
+	// ... and stops a few cells short of the border (4, plus the cell the ellipsis may leave).
+	if end := strings.Index(row[n:], "│"); end < 0 {
+		t.Errorf("no right border in %q", row)
+	} else if gap := ansi.StringWidth(row[n:n+end]) - ansi.StringWidth(strings.TrimRight(row[n:n+end], " ")); gap < 3 || gap > 6 {
+		t.Errorf("the long name ends %d cells before the border, want about 4: %q", gap, row)
 	}
 }
 
