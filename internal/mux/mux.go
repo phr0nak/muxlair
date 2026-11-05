@@ -6,8 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Target is a terminal (tmux pane or cmux surface) hosting a session.
@@ -145,8 +148,9 @@ func SendLine(t Target, agent, text string) error {
 		empty = codexPromptEmpty
 	}
 	readable := t.Mux == "tmux" || agent == "codex"
+	styled := t.Mux == "tmux" && agent == "claude" // to tell its dim placeholder from a draft
 	if readable {
-		screen, err := screenOf(t)
+		screen, err := screenOf(t, styled)
 		if err != nil {
 			return err
 		}
@@ -172,17 +176,22 @@ func SendLine(t Target, agent, text string) error {
 	}
 	for i := 0; i < 10; i++ { // up to ~2s for the agent to take the line
 		time.Sleep(200 * time.Millisecond)
-		if screen, err := screenOf(t); err == nil && empty(screen) {
+		if screen, err := screenOf(t, styled); err == nil && empty(screen) {
 			return nil
 		}
 	}
 	return fmt.Errorf("typed %s but its prompt did not clear; check the agent's prompt", text)
 }
 
-// screenOf returns the visible text of the terminal.
-func screenOf(t Target) (string, error) {
+// screenOf returns the visible text of the terminal; styled keeps tmux's SGR
+// escapes (cmux's read-screen is plain text only).
+func screenOf(t Target, styled bool) (string, error) {
 	if t.Mux == "tmux" {
-		return output("tmux", "capture-pane", "-p", "-t", t.Pane)
+		args := []string{"capture-pane", "-p", "-t", t.Pane}
+		if styled {
+			args = append(args, "-e")
+		}
+		return output("tmux", args...)
 	}
 	return output(cmuxBin(), "read-screen", "--surface", t.Pane, "--workspace", t.Workspace, "--window", t.Window)
 }
@@ -205,9 +214,15 @@ func codexPromptEmpty(screen string) bool {
 
 // promptEmpty reports whether the screen shows Claude's input prompt with nothing
 // typed: a "❯" line right below a "─" rule. Anything else, including no prompt
-// found, counts as not empty.
+// found, counts as not empty. The screen may carry SGR styling (tmux capture -e):
+// a fresh session shows an example prompt in dim text, which counts as empty,
+// but only if all of it is dim (a draft is plain text).
 func promptEmpty(screen string) bool {
-	lines := strings.Split(screen, "\n")
+	raw := strings.Split(screen, "\n")
+	lines := make([]string, len(raw))
+	for i, l := range raw {
+		lines[i] = sgrRe.ReplaceAllString(l, "")
+	}
 	for i := len(lines) - 1; i > 0; i-- {
 		l := strings.TrimSpace(lines[i])
 		if !strings.HasPrefix(l, "❯") {
@@ -217,10 +232,71 @@ func promptEmpty(screen string) bool {
 			return false
 		}
 		// The draft continues on following lines until the closing rule.
+		j := i + 1
 		if strings.TrimSpace(strings.TrimPrefix(l, "❯")) != "" {
-			return false
+			if !dimText(raw[i], false) {
+				return false
+			}
+			// A dim example prompt may wrap in a narrow pane; its other lines are dim too.
+			for ; j < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[j]), "─"); j++ {
+				if strings.TrimSpace(lines[j]) == "" || !dimText(raw[j], true) {
+					return false
+				}
+			}
 		}
-		return i+1 < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i+1]), "─")
+		return j < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[j]), "─")
 	}
 	return false
+}
+
+var sgrRe = regexp.MustCompile("\x1b\\[[0-9;:]*m")
+
+// dimText reports whether all text of a styled screen line is dim (SGR 2, until
+// a reset). On the prompt line (inPrompt false) the text is what follows the "❯".
+// Anything else, including an escape it does not understand, is not dim: this
+// must never take a draft for a placeholder.
+func dimText(line string, inPrompt bool) bool {
+	dim, seen := false, inPrompt
+	for i := 0; i < len(line); {
+		if loc := sgrRe.FindStringIndex(line[i:]); loc != nil && loc[0] == 0 {
+			dim = applySGR(dim, line[i+2:i+loc[1]-1])
+			i += loc[1]
+			continue
+		}
+		r, n := utf8.DecodeRuneInString(line[i:])
+		i += n
+		switch {
+		case r == 0x1b || r == utf8.RuneError:
+			return false // other escapes, or bytes that are not text
+		case !seen:
+			seen = r == '❯'
+		case !unicode.IsSpace(r) && !dim:
+			return false
+		}
+	}
+	return seen
+}
+
+// applySGR returns the dim state after one SGR sequence's parameters. Colors
+// (38/48 with 5;n or 2;r;g;b) are skipped so their numbers are not misread.
+func applySGR(dim bool, params string) bool {
+	if params == "" {
+		return false // ESC[m is a reset
+	}
+	ps := strings.Split(params, ";")
+	for i := 0; i < len(ps); i++ {
+		switch ps[i] {
+		case "", "0", "22":
+			dim = false
+		case "2":
+			dim = true
+		case "38", "48", "58":
+			if i+1 < len(ps) && ps[i+1] == "5" {
+				i += 2
+			} else if i+1 < len(ps) && ps[i+1] == "2" {
+				i += 4
+			}
+		}
+	}
+	return dim
 }

@@ -120,13 +120,14 @@ Press `?` in `muxlair` to see these at any time.
 | `muxlair` | Starts the dashboard. Run it inside `tmux` or `cmux`. |
 | `muxlair --help` (`-h`) | Shows the usage and exits. |
 | `muxlair --version` (`-v`) | Prints the version and exits. A release prints its tag, such as `v0.1.0`; a build from source prints `dev` or a commit-based version. |
-| `muxlair --list` | Prints every session as an aligned table and exits, without starting the dashboard. Useful for debugging or scripting. |
+| `muxlair list` (`--list`) | Prints every session as an aligned table and exits, without starting the dashboard. Useful for debugging or scripting. |
 | `muxlair trash` | Lists the sessions in `~/.muxlair/trash`, newest first. |
 | `muxlair restore <agent> <id>` | Puts a trashed session back. `<agent>` is `claude` or `codex`; take the ID from `muxlair trash`. See [Restoring](#restoring-a-session). |
+| `muxlair export codex <id>` | Prints a deleted Codex session's saved history as markdown, to read what a session that can't be restored said. It only prints and changes nothing; add `> file.md` to save it. See [Restoring](#restoring-a-session). |
 
 Any other argument prints the usage and exits with status 2.
 
-`--list` prints a header row, then one line per session, newest first. The columns are:
+`muxlair list` prints a header row, then one line per session, newest first. The columns are:
 
 | Column | Meaning |
 |---|---|
@@ -137,7 +138,7 @@ Any other argument prints the usage and exits with status 2.
 | `TTY` | The terminal the session runs in, empty when it isn't running |
 | `MAYBELIVE` | `true` when an unidentified agent process may be using it (`in use?` in the dashboard) |
 | `CWD` | The folder the session ran in |
-| `NAME` | The session name |
+| `NAME` | The session name. A Claude session with no title and no prompt yet shows `(unnamed)`; the name Claude makes up from the folder (like `stuff-50`) is not shown |
 
 ## Automatic cleanup
 
@@ -181,7 +182,7 @@ Either way, the session reappears in `muxlair` within a few seconds, and `muxlai
 - **Codex limits:**
   - Codex also keeps the turns of newer sessions in its own history database, which `muxlair` can't write back. `muxlair restore` checks that every completed turn in the saved history is in the session file, and prints a warning if some are missing. The check is a heuristic: it doesn't look at failed or interrupted turns, or at each message. The full history stays in the trash entry (`history.jsonl`).
   - Details Codex stores only in its database, such as token counts, may not come back.
-  - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column. An entry that was already restored shows `done` there, in the popup and in `muxlair trash`.
+  - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column. An entry that was already restored shows `done` there, in the popup and in `muxlair trash`. You can still read a dead session's history: `muxlair export codex <id> > session.md`. The command only prints the text to the terminal and writes no files; the redirect is what creates one. The export is partial: Codex may have lost some messages before the delete, and long command output is cut.
 
 ## Configuration
 
@@ -226,11 +227,11 @@ EOF
 
 - **Rename:**
   - **A closed session:** a Claude session gets the same rename record `/rename` would write. A Codex session is renamed through Codex's own app server.
-  - **A running session:** `muxlair` types `/rename <name>` into its terminal (a `tmux` pane, or a `cmux` tab or workspace). It does this only when the session is idle and its input box is empty, so nothing you're typing gets sent. `muxlair` reads the screen to check.
+  - **A running session:** `muxlair` types `/rename <name>` into its terminal (a `tmux` pane, or a `cmux` tab or workspace). It does this only when the session is idle and its input box is empty, so nothing you're typing gets sent. In `tmux`, and for Codex in `cmux`, `muxlair` reads the screen to check; for Claude in `cmux`, `cmux` itself guards the input box.
   - **If it can't type:** the terminal isn't a `tmux` pane or `cmux` tab or workspace it can reach, the session is busy, or you have a draft in the input box.
     - A Codex session is still renamed through the app server. `muxlair` tells you the open session keeps its old name until you run `/rename` there or reopen it.
     - A Claude session is not renamed. Run `/rename` there yourself.
-  - **A new Claude session:** until it has had a message, its input box shows a suggestion, which counts as not empty. Send it a message first.
+  - **A new Claude session:** its empty input box shows a dimmed example prompt. `muxlair` treats a prompt that is entirely dimmed text as empty, so a new session can be renamed before its first message. Until it has a title or a prompt, it shows as `(unnamed)` in the list, not the name Claude makes up from the folder. A new Codex session only appears in the list after its first message, because Codex creates it then. Anything typed there is normal text, so a draft still blocks the rename.
 - **Delete:** when you press `d`, the session goes to the trash, as described above.
 - **Automatic cleanup:** finished non-interactive runs go to the trash, as described in [Automatic cleanup](#automatic-cleanup).
 - **Restore:** `muxlair restore`, or `t` in the dashboard, puts a trashed session back, as described in [Restoring](#restoring-a-session).

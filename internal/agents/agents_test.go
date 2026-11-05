@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -441,5 +442,47 @@ func TestNotedProtectsBeforeFlush(t *testing.T) {
 	ss := []Session{{Agent: "claude", ID: "q", Headless: true}}
 	if err := applyKeepList(ss); err != nil || ss[0].Headless {
 		t.Fatalf("queued observation ignored: %v %v", err, ss[0].Headless)
+	}
+}
+
+// Claude's made-up live name ("stuff-50") is never shown; a /rename name is.
+func TestClaudeDerivedNameNotShown(t *testing.T) {
+	Home = t.TempDir()
+	proj := filepath.Join(Home, ".claude", "projects", "-p")
+	os.MkdirAll(proj, 0o700)
+	os.WriteFile(filepath.Join(proj, "empty.jsonl"), []byte(`{"type":"user","cwd":"/p"}`+"\n"), 0o600)
+	os.WriteFile(filepath.Join(proj, "prompted.jsonl"), []byte(`{"type":"user","cwd":"/p"}`+"\n"+`{"type":"last-prompt","lastPrompt":"fix the bug"}`+"\n"), 0o600)
+	sess := filepath.Join(Home, ".claude", "sessions")
+	os.MkdirAll(sess, 0o700)
+	live := func(pid int, id, name, src string) {
+		rec := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":"/p","name":%q,"nameSource":%q,"startedAt":%d}`, pid, id, name, src, time.Now().UnixMilli())
+		os.WriteFile(filepath.Join(sess, fmt.Sprintf("%d.json", pid)), []byte(rec), 0o600)
+	}
+	pids := make([]int, 4) // live records only count while their process is alive
+	for i := range pids {
+		c := exec.Command("sleep", "30")
+		if err := c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer c.Process.Kill()
+		pids[i] = c.Process.Pid
+	}
+	live(pids[0], "fresh", "p-50", "derived")    // no transcript yet
+	live(pids[1], "empty", "p-51", "derived")    // transcript without title or prompt
+	live(pids[2], "prompted", "p-52", "derived") // the prompt is a better name
+	live(pids[3], "renamed", "my name", "user")  // no transcript, named by /rename
+	got := map[string]string{}
+	ss, _ := List()
+	for _, s := range ss {
+		got[s.ID] = s.Name
+	}
+	want := map[string]string{"fresh": Unnamed, "empty": Unnamed, "prompted": "fix the bug"}
+	for id, n := range want {
+		if got[id] != n {
+			t.Errorf("%s: got %q, want %q", id, got[id], n)
+		}
+	}
+	if got["renamed"] != "my name" {
+		t.Errorf("renamed: got %q", got["renamed"])
 	}
 }

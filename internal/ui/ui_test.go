@@ -1209,3 +1209,17 @@ func TestTrashBottomBarWording(t *testing.T) {
 		t.Fatalf("narrow bar: %q (%d cells)", got, ansi.StringWidth(got))
 	}
 }
+
+// The "(unnamed)" placeholder is not a name to edit: the rename box starts empty.
+func TestRenameUnnamedStartsEmpty(t *testing.T) {
+	m := New(Options{}, "")
+	m.height = 20
+	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Name: agents.Unnamed, Cwd: "/a", Updated: time.Now()}}
+	m.rebuild()
+	m.cur = 1
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = nm.(Model)
+	if m.editing == nil || m.editBuf != "" {
+		t.Fatalf("editing %v, buf %q", m.editing != nil, m.editBuf)
+	}
+}
