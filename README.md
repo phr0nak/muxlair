@@ -51,7 +51,7 @@ Note that `muxlair` cleans up some sessions on its own: runs started by scripts 
   - `Enter` on an open session takes you to its `tmux` window or `cmux` pane. On a closed one, it reopens the session in a new `tmux` window or `cmux` pane.
   - `w` on an open session takes you to its `cmux` workspace. On a closed one, it reopens the session in a new `cmux` workspace.
 - **Rename** with `r`. The new name is applied in the agent too. Renaming inside the agent, with `/rename`, updates `muxlair` right away, along with the title of its `tmux` window or `cmux` tab, and its `cmux` workspace when the session is the only terminal in it.
-- **Delete safely** with `d`. Sessions go to `~/.muxlair/trash`: Claude sessions are moved there whole, and Codex sessions are backed up there before Codex removes them. You can put them back with `muxlair restore`. See [The trash](#the-trash).
+- **Delete safely** with `d`. Sessions go to `~/.muxlair/trash`: Claude sessions are moved there whole, and Codex sessions are backed up there before Codex removes them. You can put them back from the dashboard (`t`) or with `muxlair restore`. See [The trash](#the-trash).
 - **Automatic cleanup** of sessions started by scripts or other agents. See [Automatic cleanup](#automatic-cleanup).
 - **Details pane** with the session's ID, folder, file location, start time, last activity, model, token usage and cost, when the agent records them.
 - **Mouse support.** Scroll, click, double-click to open, drag the divider to resize the details pane, and drag across text in the details pane to copy it, for example a session ID or a path.
@@ -108,6 +108,7 @@ Press `?` in `muxlair` to see these at any time.
 | `<` `>` | Resize the details pane (dragging the divider works too) |
 | Mouse drag in the details pane | Select text; it's copied to the clipboard when you release the button |
 | `R` | Refresh |
+| `t` | Trash: list deleted sessions and restore one (`Enter`; `h` hides the ones that can't be restored; `Esc` closes) |
 | `s` | Settings |
 | `?` | Show all keys |
 | `q` or `Ctrl+C` | Quit |
@@ -164,12 +165,16 @@ Deleting a session, by hand or automatically, puts it in `~/.muxlair/trash/<agen
 
 ### Restoring a session
 
+In the dashboard, press `t` to open the trash. It lists the same columns as `muxlair trash`, centered under their headers: `AGENT`, `ID` (the first 8 characters), `DELETED`, `RESTORABLE`, `RESTORED` and `NAME` (cut after 40 characters). Move with `↑` `↓`, and press `Enter` to restore the selected entry. `RESTORABLE` is `yes`, `no` (the session file was already gone when it was deleted, see below) or `done` (the entry was already restored), and `RESTORED` shows when. When some entries can't be restored, the popup tells you how many and reminds you that `h` hides them (the `no` and `done` ones). Press `h` again to show them. The popup shows the result, and the session reappears in the list. In a narrow window, `RESTORED` and then `DELETED` are left out.
+
+From the command line:
+
 ```sh
 muxlair trash                      # list what is in the trash
 muxlair restore codex 01a1a25b-b0b4-7961-8617-061b3dd637b8
 ```
 
-The session reappears in `muxlair` within a few seconds, and `muxlair` never auto-deletes it again.
+Either way, the session reappears in `muxlair` within a few seconds, and `muxlair` never auto-deletes it again.
 
 - **Claude:** the files are moved back to where they were.
 - **Codex:** the session file is copied back, and then Codex itself picks it up (`muxlair` never writes Codex's database). The name is set again, and any helper sessions come back with it. The entry stays in the trash, marked as restored, because it holds the full backup.
@@ -177,7 +182,7 @@ The session reappears in `muxlair` within a few seconds, and `muxlair` never aut
 - **Codex limits:**
   - Codex also keeps the turns of newer sessions in its own history database, which `muxlair` can't write back. `muxlair restore` checks that every completed turn in the saved history is in the session file, and prints a warning if some are missing. The check is a heuristic: it doesn't look at failed or interrupted turns, or at each message. The full history stays in the trash entry (`history.jsonl`).
   - Details Codex stores only in its database, such as token counts, may not come back.
-  - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column. You can still read it: `muxlair export codex <id> > session.md`. The command only prints the text to the terminal and writes no files; the redirect is what creates one. The export is partial: Codex may have lost some messages before the delete, and long command output is cut.
+  - A session that showed as `dead` when it was deleted had no session file left, so Codex couldn't reopen it then either. Only a readable copy of its history (`history.jsonl`) was saved, and `muxlair trash` shows `no` in the `RESTORABLE` column. An entry that was already restored shows `done` there, in the popup and in `muxlair trash`. You can still read a dead session's history: `muxlair export codex <id> > session.md`. The command only prints the text to the terminal and writes no files; the redirect is what creates one. The export is partial: Codex may have lost some messages before the delete, and long command output is cut.
 
 ## Configuration
 
@@ -229,7 +234,7 @@ EOF
   - **A new Claude session:** its empty input box shows a dimmed example prompt. `muxlair` treats a prompt that is entirely dimmed text as empty, so a new session can be renamed before its first message. Until it has a title or a prompt, it shows as `(unnamed)` in the list, not the name Claude makes up from the folder. A new Codex session only appears in the list after its first message, because Codex creates it then. Anything typed there is normal text, so a draft still blocks the rename.
 - **Delete:** when you press `d`, the session goes to the trash, as described above.
 - **Automatic cleanup:** finished non-interactive runs go to the trash, as described in [Automatic cleanup](#automatic-cleanup).
-- **Restore:** `muxlair restore` puts a trashed session back, as described in [Restoring](#restoring-a-session).
+- **Restore:** `muxlair restore`, or `t` in the dashboard, puts a trashed session back, as described in [Restoring](#restoring-a-session).
 
 `muxlair`'s own files live in `~/.muxlair`: `config.json`, the `trash` folder, and `interactive.json` (with its lock file, `interactive.lock`), its list of non-interactive runs you resumed yourself, which it must never clean up.
 

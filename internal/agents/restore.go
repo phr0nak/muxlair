@@ -35,6 +35,20 @@ func (e TrashEntry) Restorable() bool {
 	return len(e.Meta.Files) > 0
 }
 
+// State is what the RESTORABLE column shows, in the dashboard's trash popup and
+// in `muxlair trash`: "done" for an entry that was already restored (enter
+// refuses it), "no" when its session files are missing, "yes" when it can be
+// restored.
+func (e TrashEntry) State() string {
+	switch {
+	case e.Restored():
+		return "done"
+	case !e.Restorable():
+		return "no"
+	}
+	return "yes"
+}
+
 // ListTrash returns the trash entries, newest first. An entry whose meta.json
 // can't be read is skipped and reported in the error.
 func ListTrash() ([]TrashEntry, error) {
@@ -85,14 +99,24 @@ func Restore(agent, id string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("no %s session %s in the trash (see: muxlair trash)", agent, id)
 	}
+	return RestoreEntry(*e)
+}
+
+// RestoreEntry restores exactly this trash entry, which matters when the same
+// session was deleted more than once. Restore picks the newest one itself.
+func RestoreEntry(e TrashEntry) ([]string, error) {
+	if e.Restored() {
+		return nil, fmt.Errorf("%s %s was already restored (its backup stays in the trash)", e.Meta.Agent, e.Meta.ID)
+	}
 	var notes []string
-	switch agent {
+	var err error
+	switch e.Meta.Agent {
 	case "claude":
-		err = restoreClaude(*e)
+		err = restoreClaude(e)
 	case "codex":
-		notes, err = restoreCodex(*e)
+		notes, err = restoreCodex(e)
 	default:
-		err = errors.New("restoring " + agent + " sessions is not supported")
+		err = errors.New("restoring " + e.Meta.Agent + " sessions is not supported")
 	}
 	if err != nil {
 		return nil, err
