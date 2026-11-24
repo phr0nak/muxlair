@@ -118,7 +118,7 @@ Press `?` in `muxlair` to see these at any time.
 | `muxlair` | Starts the dashboard. Run it inside `tmux`, `cmux` or Rex. |
 | `muxlair --help` (`-h`) | Shows the usage and exits. |
 | `muxlair --version` (`-v`) | Prints the version and exits. A release prints its tag, such as `v0.1.0`; a build from source prints `dev` or a commit-based version. |
-| `muxlair list` (`--list`) | Prints every session as an aligned table and exits, without starting the dashboard. Useful for debugging or scripting. |
+| `muxlair list [agent]` | Prints every session as an aligned table and exits, without starting the dashboard. Useful for debugging or scripting. With an agent (`claude`, `codex`, `opencode`, `pi` or `agy`), only that agent's sessions. |
 
 Any other argument prints the usage and exits with status 2.
 
@@ -129,11 +129,11 @@ Any other argument prints the usage and exits with status 2.
 | `STATUS` | `busy`, `idle` or `exited` |
 | `ID` | The agent's session ID |
 | `UPDATED` | Last activity, `YYYY-MM-DD HH:MM` |
-| `AGENT` | `claude` or `codex` |
+| `AGENT` | `claude`, `codex`, `opencode`, `pi` or `agy` |
 | `TTY` | The terminal the session runs in, empty when it isn't running |
 | `MAYBELIVE` | `true` when an unidentified agent process may be using it (`in use?` in the dashboard) |
 | `CWD` | The folder the session ran in |
-| `NAME` | The session name. A Claude session with no title and no prompt yet shows `(unnamed)`; the name Claude makes up from the folder (like `stuff-50`) is not shown |
+| `NAME` | The session name, cut to its first six words (`…` marks a cut). A Claude session with no title and no prompt yet shows `(unnamed)`; the name Claude makes up from the folder (like `stuff-50`) is not shown |
 
 `muxlair trash`, `muxlair restore` and `muxlair export` were removed in v0.5.0, along with delete (`d`), the Trash popup (`t`) and automatic cleanup. `muxlair` leaves an existing `~/.muxlair/trash` as it is. To restore something from it, install v0.4.1 (`go install github.com/phr0nak/muxlair/cmd/muxlair@v0.4.1`) and use its `muxlair restore`.
 
