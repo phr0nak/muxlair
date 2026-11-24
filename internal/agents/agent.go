@@ -15,11 +15,12 @@ type Agent interface {
 	// running agent may then keep showing the old name until told in its terminal.
 	Rename(s Session, name string) error
 	RenameRunning() bool
-	// RenameLine is what to type in a running session's terminal to rename it.
+	// RenameLine is what to type in a running session's terminal to rename it;
+	// "" means Rename alone also renames a running session, nothing to type.
 	RenameLine(name string) string
 }
 
-var registry = []Agent{claudeAgent{}, codexAgent{}}
+var registry = []Agent{claudeAgent{}, codexAgent{}, opencodeAgent{}}
 
 // ByName returns the agent whose Name is name.
 func ByName(name string) (Agent, bool) {
