@@ -27,6 +27,7 @@ var (
 		"codex":    "#3B82F6", // blue
 		"opencode": "#8B5CF6", // purple
 		"pi":       "#FFE135", // banana yellow
+		"agy":      "#10B981", // green
 	}
 	statusColor = map[agents.Status]lipgloss.Color{
 		agents.Busy:   "#22C55E",
@@ -249,8 +250,12 @@ func watch(ch, cfg chan struct{}, cfgPath string) {
 				cfgDebounce = time.After(150 * time.Millisecond)
 				continue
 			}
-			if ev.Has(fsnotify.Create) && filepath.Dir(ev.Name) == filepath.Join(agents.Home, ".claude", "projects") {
-				w.Add(ev.Name) // new Claude project dir; Add on a non-dir is a harmless error
+			if ev.Has(fsnotify.Create) {
+				// A new folder inside a watched one (a Claude project, a pi session
+				// folder, agy's annotations): watch it too.
+				if st, err := os.Stat(ev.Name); err == nil && st.IsDir() {
+					w.Add(ev.Name)
+				}
 			}
 			if relevant(ev.Name) && debounce == nil {
 				debounce = time.After(150 * time.Millisecond)
@@ -278,6 +283,8 @@ func relevant(path string) bool {
 	switch {
 	case strings.HasPrefix(base, "state_5.sqlite"), base == "session_index.jsonl", strings.HasPrefix(base, "opencode.db"):
 		return true
+	case strings.Contains(path, "/antigravity-cli/"): // agy: its index, /rename titles, presence locks
+		return strings.HasPrefix(base, "conversation_summaries.db") || strings.HasSuffix(base, ".pbtxt") || strings.HasSuffix(base, ".lock")
 	case strings.HasPrefix(path, agents.CodexHome()+"/"):
 		return false
 	}

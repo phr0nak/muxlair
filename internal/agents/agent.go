@@ -20,7 +20,7 @@ type Agent interface {
 	RenameLine(name string) string
 }
 
-var registry = []Agent{claudeAgent{}, codexAgent{}, opencodeAgent{}, piAgent{}}
+var registry = []Agent{claudeAgent{}, codexAgent{}, opencodeAgent{}, piAgent{}, agyAgent{}}
 
 // ByName returns the agent whose Name is name.
 func ByName(name string) (Agent, bool) {
