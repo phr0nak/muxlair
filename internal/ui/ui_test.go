@@ -1055,3 +1055,70 @@ func TestRelevantWatchEvents(t *testing.T) {
 		}
 	}
 }
+
+// h hides exited sessions and shows them again; open and "in use?" ones stay.
+func TestHideExited(t *testing.T) {
+	m := New(Options{}, "")
+	m.height, m.width = 30, 160
+	now := time.Now()
+	m.sessions = []agents.Session{
+		{Agent: "claude", ID: "busy", Name: "busy one", Cwd: "/a", Status: agents.Busy, Updated: now},
+		{Agent: "codex", ID: "gone", Name: "exited one", Cwd: "/a", Status: agents.Exited, Updated: now},
+		{Agent: "pi", ID: "maybe", Name: "maybe one", Cwd: "/b", Status: agents.Exited, MaybeLive: true, Updated: now},
+		{Agent: "agy", ID: "old", Name: "only exited", Cwd: "/c", Status: agents.Exited, Updated: now},
+	}
+	m.rebuild()
+	shown := func() string { return ansi.Strip(m.View()) }
+	if !strings.Contains(shown(), "exited one") || !strings.Contains(shown(), "⏎ open session") {
+		t.Fatalf("before:\n%s", shown())
+	}
+	m, _ = press(m, "h")
+	v := shown()
+	if strings.Contains(v, "exited one") || strings.Contains(v, "only exited") || !strings.Contains(v, "busy one") || !strings.Contains(v, "maybe one") {
+		t.Fatalf("h should hide exited sessions only:\n%s", v)
+	}
+	if strings.Contains(v, "/c") {
+		t.Fatalf("a folder with only exited sessions should disappear:\n%s", v)
+	}
+	m.showDetails, m.cur = true, m.indexOfGroup("/a") // the folder's details count what its header shows
+	if !strings.Contains(shown(), "Sessions  1") {
+		t.Fatalf("details count:\n%s", shown())
+	}
+	m.status = ""
+	if !strings.Contains(shown(), `"exited" sessions hidden`) {
+		t.Fatalf("the bottom bar should say exited sessions are hidden:\n%s", shown())
+	}
+	m, _ = press(m, "h")
+	if !strings.Contains(shown(), "exited one") {
+		t.Fatal("a second h should show them again")
+	}
+}
+
+// A bottom-bar message clears after statusShown; an older timer leaves a newer one.
+func TestStatusExpires(t *testing.T) {
+	m := New(Options{}, "")
+	m.height, m.width = 20, 120
+	m, _ = press(m, "h")
+	first := m.statusAt
+	if m.status == "" || first.IsZero() {
+		t.Fatalf("status %q at %v", m.status, first)
+	}
+	m, _ = press(m, "h") // a new message, with its own time
+	nm, _ := m.Update(statusExpiredMsg{first})
+	if m = nm.(Model); m.status == "" {
+		t.Fatal("an older timer cleared a newer message")
+	}
+	nm, _ = m.Update(statusExpiredMsg{m.statusAt})
+	if m = nm.(Model); m.status != "" {
+		t.Fatalf("not cleared: %q", m.status)
+	}
+	// The same message shown again by a key gets a new time too.
+	m.peek = nil
+	m, _ = press(m, "p")
+	same := m.statusAt
+	time.Sleep(time.Millisecond)
+	m, _ = press(m, "p")
+	if m.statusAt.Equal(same) || m.status == "" {
+		t.Fatalf("a repeated message kept the old timer: %q", m.status)
+	}
+}

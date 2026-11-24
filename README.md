@@ -98,7 +98,8 @@ Press `?` in `muxlair` to see these at any time.
 |---|---|
 | `↑` `↓` or `j` `k` | Move |
 | `Enter` or double-click | Jump to the session, or reopen it |
-| `←` `→` or `h` `l` | Collapse / expand a folder |
+| `←` `→` (or `l` to expand) | Collapse / expand a folder |
+| `h` | Hide / show exited sessions. Open sessions and `in use?` ones stay listed; the bottom bar says `"exited" sessions hidden` while they are hidden. |
 | `Space` or `Tab` | Toggle a folder |
 | `r` | Rename |
 | `/` | Filter: type to narrow the list, `Enter` keeps the filter, `Esc` clears it. To clear a kept filter later, press `/` then `Esc`. |
