@@ -116,7 +116,6 @@ var keyHelp = [][2]string{
 	{"↑ ↓  j k", "move"},
 	{"enter", "jump to the session, or reopen it"},
 	{"double-click", "same as enter"},
-	{"w", "open in a new cmux workspace"},
 	{"← →  h l", "collapse / expand a folder"},
 	{"space  tab", "toggle a folder"},
 	{"r", "rename (in the agent too)"},
@@ -516,7 +515,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.lastClick = time.Time{} // a header click never starts a double-click
 		} else if double {
 			m.lastClick = time.Time{}
-			return m, m.open(false)
+			return m, m.open()
 		}
 	}
 	return m, nil
@@ -854,9 +853,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "enter":
-		return m, m.open(false)
-	case "w":
-		return m, m.open(true)
+		return m, m.open()
 	}
 	return m, nil
 }
@@ -878,7 +875,7 @@ func (m Model) row() (row, bool) {
 	return m.rows[m.cur], true
 }
 
-func (m *Model) open(workspace bool) tea.Cmd {
+func (m *Model) open() tea.Cmd {
 	r, ok := m.row()
 	if !ok || r.s == nil {
 		return nil
@@ -926,7 +923,7 @@ func (m *Model) open(workspace bool) tea.Cmd {
 		case s.MaybeLive:
 			return openFailedMsg{k, "an unidentified " + s.Agent + " process in this folder may already run this session"}
 		}
-		if err := mux.Open(tabName(s.Name), s.Cwd, s.Resume, color, workspace); err != nil {
+		if err := mux.Open(tabName(s.Name), s.Cwd, s.Resume, color); err != nil {
 			return openFailedMsg{k, err.Error()}
 		}
 		return statusMsg("opened " + s.Name)
@@ -1213,7 +1210,7 @@ func (m Model) View() string {
 		foot = m.status
 	default:
 		// Resize, fold and mouse keys are left to the ? popup, to keep this line short.
-		foot = "enter open/focus · w cmux workspace · r rename · R refresh · i details · / filter · s settings · q quit"
+		foot = "enter open/focus · r rename · R refresh · i details · / filter · s settings · q quit"
 		if m.filter != "" {
 			foot = "filter: " + m.filter + " · " + foot
 		}

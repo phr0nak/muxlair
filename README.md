@@ -46,8 +46,8 @@ Together, a home base for all your AI coding-agent sessions.
   | `in use?` | An agent process `muxlair` can't identify may be using it, so `muxlair` won't open it. Codex only. |
 
 - **Jump or reopen.** 
-  - `Enter` on an open session takes you to its `tmux` window or `cmux` pane. On a closed one, it reopens the session in a new `tmux` window, `cmux` pane or Rex tab. In Rex, `muxlair` can't jump to a session that is already open yet.
-  - `w` on an open session takes you to its `cmux` workspace. On a closed one, it reopens the session in a new `cmux` workspace.
+  - `Enter` on an open session takes you to its `tmux` window or `cmux` pane.
+  - `Enter` on a closed one reopens it where `muxlair` runs: a new `tmux` window, a new `cmux` workspace, or a new Rex tab. In Rex, `muxlair` can't jump to a session that is already open yet.
 - **Rename** with `r`. The new name is applied in the agent too. Renaming inside the agent, with `/rename`, updates `muxlair` right away, along with the title of its `tmux` window or `cmux` tab, and its `cmux` workspace when the session is the only terminal in it.
 - **Details pane** with the session's ID, folder, file location, start time, last activity, model, token usage and cost, when the agent records them.
 - **Conversation peek.** The details pane also shows the latest exchange of the conversation (your last prompt and the agent's answer), and `p` opens it in full. It is read from the session's own file, never summarized, and tool calls and reasoning are left out. See [Conversation peek](#conversation-peek).
@@ -95,7 +95,6 @@ Press `?` in `muxlair` to see these at any time.
 |---|---|
 | `↑` `↓` or `j` `k` | Move |
 | `Enter` or double-click | Jump to the session, or reopen it |
-| `w` | Reopen in a new `cmux` workspace (on an open session, jumps like `Enter`) |
 | `←` `→` or `h` `l` | Collapse / expand a folder |
 | `Space` or `Tab` | Toggle a folder |
 | `r` | Rename |
@@ -207,7 +206,7 @@ With the details pane open, the selected session shows a **Latest exchange** blo
 - **Agent file formats can change.** `muxlair` reads Claude Code's and Codex's own files (transcripts, session records, Codex's databases). These are not stable, documented interfaces, so an agent update can break session discovery, names or the details pane until `muxlair` catches up.
 - **Platforms.** `muxlair` is developed and tested on macOS only. It has not been tested on Linux, and may not work there yet. Known issue: if Codex runs with its shared app-server daemon, a running Codex session can't be matched to its terminal, so jump and rename-in-place don't work for it. Windows is not supported.
 - **Only Claude Code and Codex.** Other agents are not supported yet.
-- **Rex support is partial.** Inside Rex, `muxlair` opens closed sessions in a new tab of the Rex session it runs in. It can't jump to a session that is already open in a Rex tab, `w` still needs `cmux`, and Rex tabs get no agent color.
+- **Rex support is partial.** Inside Rex, `muxlair` opens closed sessions in a new tab of the Rex session it runs in. It can't jump to a session that is already open in a Rex tab or type `/rename` into it, and Rex tabs get no agent color.
 
 ## License
 

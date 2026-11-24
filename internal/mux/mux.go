@@ -89,22 +89,10 @@ func Rename(t Target, name string) error {
 	return cmuxRename(t, name)
 }
 
-// Open starts cmd (a shell command) in cwd: a new tmux window, Rex tab or cmux
-// pane, wherever muxlair runs. workspace=true forces a new cmux workspace.
-// color ("#RRGGBB", or "" for none) tints the new tmux window tab or cmux workspace;
-// a cmux pane opened inside the current workspace has no tab color to set.
-func Open(name, cwd, cmd, color string, workspace bool) error {
-	if workspace {
-		out, err := output(cmuxBin(), "new-workspace", "--name", name, "--cwd", cwd, "--command", cmd, "--focus", "true")
-		if err != nil || color == "" {
-			return err
-		}
-		ws := workspaceRef(out)
-		if ws == "" {
-			return fmt.Errorf("cmux new-workspace: no workspace ref in %q", out)
-		}
-		return run(cmuxBin(), "workspace-action", "--action", "set-color", "--workspace", ws, "--color", color)
-	}
+// Open starts cmd (a shell command) in cwd, in whatever muxlair runs in: a new
+// tmux window, cmux workspace or Rex tab, named name. color ("#RRGGBB", or "" for
+// none) tints the tmux window's tab or the cmux workspace; Rex tabs have no color.
+func Open(name, cwd, cmd, color string) error {
 	switch Current() {
 	case "tmux":
 		win, err := output("tmux", "new-window", "-P", "-F", "#{window_id}", "-n", name, "-c", cwd, cmd)
@@ -116,9 +104,17 @@ func Open(name, cwd, cmd, color string, workspace bool) error {
 		}
 		return run("tmux", "set-option", "-w", "-t", win, "window-status-current-style", "fg="+color+",bold")
 	case "rex":
-		return rexOpen(name, cwd, cmd) // Rex tabs have no color to set
+		return rexOpen(name, cwd, cmd)
 	case "cmux":
-		return run(cmuxBin(), "new-pane", "--direction", "right", "--command", cmd, "--focus", "true")
+		out, err := output(cmuxBin(), "new-workspace", "--name", name, "--cwd", cwd, "--command", cmd, "--focus", "true")
+		if err != nil || color == "" {
+			return err
+		}
+		ws := workspaceRef(out)
+		if ws == "" {
+			return fmt.Errorf("cmux new-workspace: no workspace ref in %q", out)
+		}
+		return run(cmuxBin(), "workspace-action", "--action", "set-color", "--workspace", ws, "--color", color)
 	}
 	return fmt.Errorf("not inside tmux, cmux or Rex")
 }

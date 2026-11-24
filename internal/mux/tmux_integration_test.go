@@ -20,7 +20,7 @@ func TestTmuxOpenFindRename(t *testing.T) {
 	t.Setenv("TMUX", sock+",0,0")
 	t.Setenv("CMUX_WORKSPACE_ID", "")
 
-	if err := Open("first", "/tmp", "sleep 30", "#D97757", false); err != nil {
+	if err := Open("first", "/tmp", "sleep 30", "#D97757"); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(200 * time.Millisecond)
