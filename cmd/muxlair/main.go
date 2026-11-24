@@ -19,7 +19,7 @@ var version = ""
 const usage = `muxlair: a terminal dashboard for local Claude Code and Codex sessions.
 
 Usage:
-  muxlair             start the dashboard (run it inside tmux or cmux)
+  muxlair             start the dashboard (run it inside tmux, cmux or Rex)
   muxlair list        print sessions as an aligned table and exit
   muxlair --version   print the version and exit
   muxlair --help      show this help

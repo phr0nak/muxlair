@@ -149,3 +149,24 @@ func TestCodexPromptEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestRexLabel(t *testing.T) {
+	for in, want := range map[string]string{"fix login": "fix login", "--rm -rf": "rm -rf", "--": "session", "- ": "session"} {
+		if got := rexLabel(in); got != want {
+			t.Errorf("rexLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCurrentPrefersRexOverCmux(t *testing.T) {
+	t.Setenv("TMUX", "")
+	t.Setenv("CMUX_WORKSPACE_ID", "ws")
+	t.Setenv("REX_SESSION", "session:1")
+	if got := Current(); got != "rex" {
+		t.Fatalf("got %q", got)
+	}
+	t.Setenv("TMUX", "/tmp/tmux-501/default,1,0")
+	if got := Current(); got != "tmux" {
+		t.Fatalf("nested tmux: got %q", got)
+	}
+}

@@ -23,16 +23,44 @@ type Target struct {
 	Solo      bool   // only terminal in its tmux window / cmux workspace
 }
 
-// Current reports which multiplexer muxlair itself runs in: "cmux", "tmux" or "".
-// tmux wins when nested, since that is the client the user is looking at.
+// Current reports which multiplexer muxlair itself runs in: "tmux", "rex", "cmux"
+// or "". tmux wins when nested, since that is the client the user is looking at.
+// Rex comes before cmux: a Rex app started from a cmux shell inherits cmux's
+// variables, while cmux panes never get REX_SESSION.
 func Current() string {
 	switch {
-	case os.Getenv("TMUX") != "":
+	case os.Getenv("TMUX") != "" && (os.Getenv("REX_SESSION") == "" || inTmuxPane()):
 		return "tmux"
+	case os.Getenv("REX_SESSION") != "":
+		return "rex"
 	case os.Getenv("CMUX_WORKSPACE_ID") != "":
 		return "cmux"
 	}
 	return ""
+}
+
+// inTmuxPane reports whether muxlair's own terminal is the tmux pane named by
+// TMUX_PANE. With both TMUX and REX_SESSION set, either tmux runs inside a Rex tab
+// (yes) or the Rex server was started from a tmux shell and every Rex tab
+// inherited TMUX (no). If it can't tell, it says yes: the old behavior.
+func inTmuxPane() bool {
+	pane, err := output("tmux", "display-message", "-p", "-t", os.Getenv("TMUX_PANE"), "#{pane_tty}")
+	if err != nil {
+		return true
+	}
+	own, err := ownTTY()
+	if err != nil {
+		return true
+	}
+	return own == pane
+}
+
+// ownTTY is the terminal muxlair runs in, e.g. "/dev/ttys006" (a variable for tests).
+var ownTTY = func() (string, error) {
+	cmd := exec.Command("tty")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // Targets maps tty name ("ttys023") to the terminal that owns it, across tmux and cmux.
@@ -61,21 +89,10 @@ func Rename(t Target, name string) error {
 	return cmuxRename(t, name)
 }
 
-// Open starts cmd (a shell command) in cwd. workspace=true forces a new cmux workspace.
-// color ("#RRGGBB", or "" for none) tints the new tmux window tab or cmux workspace;
-// a cmux pane opened inside the current workspace has no tab color to set.
-func Open(name, cwd, cmd, color string, workspace bool) error {
-	if workspace {
-		out, err := output(cmuxBin(), "new-workspace", "--name", name, "--cwd", cwd, "--command", cmd, "--focus", "true")
-		if err != nil || color == "" {
-			return err
-		}
-		ws := workspaceRef(out)
-		if ws == "" {
-			return fmt.Errorf("cmux new-workspace: no workspace ref in %q", out)
-		}
-		return run(cmuxBin(), "workspace-action", "--action", "set-color", "--workspace", ws, "--color", color)
-	}
+// Open starts cmd (a shell command) in cwd, in whatever muxlair runs in: a new
+// tmux window, cmux workspace or Rex tab, named name. color ("#RRGGBB", or "" for
+// none) tints the tmux window's tab or the cmux workspace; Rex tabs have no color.
+func Open(name, cwd, cmd, color string) error {
 	switch Current() {
 	case "tmux":
 		win, err := output("tmux", "new-window", "-P", "-F", "#{window_id}", "-n", name, "-c", cwd, cmd)
@@ -86,10 +103,20 @@ func Open(name, cwd, cmd, color string, workspace bool) error {
 			return err
 		}
 		return run("tmux", "set-option", "-w", "-t", win, "window-status-current-style", "fg="+color+",bold")
+	case "rex":
+		return rexOpen(name, cwd, cmd)
 	case "cmux":
-		return run(cmuxBin(), "new-pane", "--direction", "right", "--command", cmd, "--focus", "true")
+		out, err := output(cmuxBin(), "new-workspace", "--name", name, "--cwd", cwd, "--command", cmd, "--focus", "true")
+		if err != nil || color == "" {
+			return err
+		}
+		ws := workspaceRef(out)
+		if ws == "" {
+			return fmt.Errorf("cmux new-workspace: no workspace ref in %q", out)
+		}
+		return run(cmuxBin(), "workspace-action", "--action", "set-color", "--workspace", ws, "--color", color)
 	}
-	return fmt.Errorf("not inside tmux or cmux")
+	return fmt.Errorf("not inside tmux, cmux or Rex")
 }
 
 // workspaceRef extracts "workspace:N" from cmux output like "OK workspace:12".
