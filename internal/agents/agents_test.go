@@ -228,3 +228,22 @@ func TestClaudeDerivedNameNotShown(t *testing.T) {
 		t.Errorf("renamed: got %q", got["renamed"])
 	}
 }
+
+func TestRegistry(t *testing.T) {
+	seen := map[string]bool{}
+	for _, a := range registry {
+		if seen[a.Name()] {
+			t.Fatalf("%s registered twice", a.Name())
+		}
+		seen[a.Name()] = true
+		if got, ok := ByName(a.Name()); !ok || got.Name() != a.Name() {
+			t.Fatalf("ByName(%q) = %v %v", a.Name(), got, ok)
+		}
+	}
+	if _, ok := ByName("nope"); ok {
+		t.Fatal("unknown agent found")
+	}
+	if _, err := SessionDetails(Session{Agent: "nope"}, false); err == nil {
+		t.Fatal("details for an unknown agent")
+	}
+}

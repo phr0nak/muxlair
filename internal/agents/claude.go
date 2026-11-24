@@ -43,6 +43,15 @@ type claudeLive struct {
 	tty        string
 }
 
+func claudeWatchPaths() []string {
+	paths := []string{
+		filepath.Join(Home, ".claude", "sessions"),
+		filepath.Join(Home, ".claude", "projects"), // new project dirs get watched as they appear
+	}
+	dirs, _ := filepath.Glob(filepath.Join(Home, ".claude", "projects", "*"))
+	return append(paths, dirs...)
+}
+
 // Unnamed is shown for a Claude session that has no title and no prompt yet.
 const Unnamed = "(unnamed)"
 

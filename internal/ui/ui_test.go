@@ -1001,3 +1001,38 @@ func TestPeekPopupDoesNotMoveWithCopyResult(t *testing.T) {
 		t.Error("the copy result is not shown")
 	}
 }
+
+// fakeAgent records offline renames; live says whether it renames while running.
+type fakeAgent struct {
+	live    bool
+	renamed *string
+}
+
+func (fakeAgent) Name() string                                         { return "fake" }
+func (fakeAgent) Title() string                                        { return "Fake" }
+func (fakeAgent) List() ([]agents.Session, error)                      { return nil, nil }
+func (fakeAgent) WatchPaths() []string                                 { return nil }
+func (fakeAgent) Details(agents.Session, bool) (agents.Details, error) { return agents.Details{}, nil }
+func (f fakeAgent) RenameRunning() bool                                { return f.live }
+func (fakeAgent) RenameLine(n string) string                           { return "/name " + n }
+func (f fakeAgent) Rename(_ agents.Session, n string) error            { *f.renamed = n; return nil }
+
+// A running session muxlair can't type into: an agent that renames while running
+// is renamed anyway with a note; any other is left alone with an error.
+func TestRenameRunningUnreachable(t *testing.T) {
+	s := agents.Session{Agent: "fake", ID: "1", PID: 1}
+	var got string
+	note, err := renameRunning(fakeAgent{live: true, renamed: &got}, s, "new")
+	if err != nil || got != "new" || !strings.Contains(note, "the open Fake keeps the old name until you run /name there") {
+		t.Fatalf("live: note %q err %v renamed %q", note, err, got)
+	}
+	got = ""
+	note, err = renameRunning(fakeAgent{renamed: &got}, s, "new")
+	if err == nil || err.Error() != "can't reach its terminal; run /name new there" || got != "" || note != "" {
+		t.Fatalf("not live: note %q err %v renamed %q", note, err, got)
+	}
+	s.TTY, s.Status = "ttys999", agents.Busy // not a terminal muxlair knows: still unreachable
+	if _, err = renameRunning(fakeAgent{renamed: &got}, s, "new"); err == nil || got != "" {
+		t.Fatalf("unknown tty: err %v renamed %q", err, got)
+	}
+}

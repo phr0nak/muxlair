@@ -70,17 +70,14 @@ func DropPeekCache() {
 // exchange of the conversation; when it is false no conversation text is read
 // or cached.
 func SessionDetails(s Session, peek bool) (Details, error) {
-	switch s.Agent {
-	case "claude":
-		if len(s.Files) == 0 {
-			return Details{}, errors.New("no transcript yet")
-		}
-		return claudeDetails(s.Files[0], peek)
-	case "codex":
-		return codexDetails(s, peek)
+	a, ok := ByName(s.Agent)
+	if !ok {
+		return Details{}, errors.New("details not supported for " + s.Agent)
 	}
-	return Details{}, errors.New("details not supported for " + s.Agent)
+	return a.Details(s, peek)
 }
+
+var errNoTranscript = errors.New("no transcript yet")
 
 func claudeDetails(path string, peek bool) (Details, error) {
 	st, err := os.Stat(path)
