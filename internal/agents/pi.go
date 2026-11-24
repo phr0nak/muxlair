@@ -156,6 +156,13 @@ type piMessage struct {
 	Usage      *piUsage        `json:"usage"`
 }
 
+// piMessageMeta is a message without its content, for reading usage and model.
+type piMessageMeta struct {
+	Role  string   `json:"role"`
+	Model string   `json:"model"`
+	Usage *piUsage `json:"usage"`
+}
+
 type piUsage struct {
 	Input, Output, CacheRead, CacheWrite int64
 	Cost                                 struct{ Total float64 }
@@ -305,10 +312,11 @@ func (piAgent) Details(s Session, peek bool) (Details, error) {
 			ID        string
 			ParentID  *string `json:"parentId"`
 			Timestamp time.Time
-			Message   piMessage
+			Message   piMessageMeta
 			Usage     *piUsage
 			ModelID   string `json:"modelId"`
 		}
+		// Metadata only: with the peek off, no conversation text is decoded.
 		if json.Unmarshal(sc.Bytes(), &e) != nil {
 			continue
 		}
@@ -334,7 +342,10 @@ func (piAgent) Details(s Session, peek bool) (Details, error) {
 				}
 			}
 			if peek {
-				msgs = append(msgs, piEntry{e.ID, e.Message})
+				var full struct{ Message piMessage }
+				if json.Unmarshal(sc.Bytes(), &full) == nil {
+					msgs = append(msgs, piEntry{e.ID, full.Message})
+				}
 			}
 		}
 		if u != nil { // every branch's turns, usage and compaction entries count, as in pi's totals

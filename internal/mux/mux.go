@@ -173,7 +173,7 @@ func output(name string, args ...string) (string, error) {
 // (Codex does, with no pause at all; 50ms was enough in testing).
 const enterDelay = 200 * time.Millisecond
 
-// SendLine types text into an agent's prompt ("claude" or "codex") and presses
+// SendLine types text into an agent's prompt ("claude", "codex" or "agy") and presses
 // Enter. It refuses unless the prompt is empty, so a half-written draft is never
 // submitted. cmux guards Claude's prompt itself, but not Codex's (typing over a
 // Codex draft just appends to it), and tmux and Rex guard nothing: for those muxlair
@@ -182,11 +182,14 @@ const enterDelay = 200 * time.Millisecond
 // agent did not take is reported.
 func SendLine(t Target, agent, text string) error {
 	empty := promptEmpty
-	if agent == "codex" {
+	switch agent {
+	case "codex":
 		empty = codexPromptEmpty
+	case "agy":
+		empty = agyPromptEmpty
 	}
-	readable := t.Mux != "cmux" || agent == "codex"
-	styled := t.Mux != "cmux" && agent == "claude" // to tell its dim placeholder from a draft
+	readable := t.Mux != "cmux" || agent != "claude" // cmux guards only Claude's prompt
+	styled := t.Mux != "cmux" && agent == "claude"   // to tell its dim placeholder from a draft
 	if readable {
 		screen, err := screenOf(t, styled)
 		if err != nil {
@@ -260,6 +263,21 @@ func codexPromptEmpty(screen string) bool {
 // found, counts as not empty. The screen may carry SGR styling (tmux capture -e):
 // a fresh session shows an example prompt in dim text, which counts as empty,
 // but only if all of it is dim (a draft is plain text).
+// agyPromptEmpty reports whether agy's input box, a "> " line between two
+// rules, holds nothing. An answer's own quoted "> " lines have no rules around them.
+func agyPromptEmpty(screen string) bool {
+	lines := strings.Split(screen, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSpace(sgrRe.ReplaceAllString(lines[i], ""))
+	}
+	for i := len(lines) - 2; i > 0; i-- {
+		if strings.HasPrefix(lines[i], ">") && strings.HasPrefix(lines[i-1], "─") && strings.HasPrefix(lines[i+1], "─") {
+			return strings.TrimSpace(strings.TrimPrefix(lines[i], ">")) == ""
+		}
+	}
+	return false
+}
+
 func promptEmpty(screen string) bool {
 	raw := strings.Split(screen, "\n")
 	lines := make([]string, len(raw))

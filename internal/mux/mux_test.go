@@ -202,3 +202,17 @@ func TestRexVTKeepsOnlySGR(t *testing.T) {
 		t.Fatalf("dim placeholder not seen as empty: %q", screen)
 	}
 }
+
+func TestAgyPromptEmpty(t *testing.T) {
+	rule := "\x1b[0m\x1b[38;5;8m──────────\x1b[0m\r"
+	empty := strings.Join([]string{rule, "\x1b[0m\x1b[1m\x1b[38;5;4m> hello\x1b[0m\r", "\r", "  Hi!\r", "\r", rule, "\x1b[0m\x1b[38;5;12m>\x1b[0m\r", rule, "? for shortcuts"}, "\n")
+	if !agyPromptEmpty(empty) {
+		t.Fatal("empty input box not recognized")
+	}
+	if agyPromptEmpty(strings.Replace(empty, "\x1b[38;5;12m>\x1b", "\x1b[38;5;12m> half a draft\x1b", 1)) {
+		t.Fatal("a draft counted as empty")
+	}
+	if agyPromptEmpty("> quoted line\nno box here") {
+		t.Fatal("a line without its rules counted as the input box")
+	}
+}
