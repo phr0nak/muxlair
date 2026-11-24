@@ -119,7 +119,8 @@ var keyHelp = [][2]string{
 	{"↑ ↓  j k", "move"},
 	{"enter", "jump to the session, or reopen it"},
 	{"double-click", "same as enter"},
-	{"← →  h l", "collapse / expand a folder"},
+	{"← →  l", "collapse / expand a folder"},
+	{"h", "hide / show exited sessions"},
 	{"space  tab", "toggle a folder"},
 	{"r", "rename (in the agent too)"},
 	{"/", "filter; esc clears it"},
@@ -145,6 +146,8 @@ type Model struct {
 	selecting   bool       // mouse button held while selecting
 	selPane     string     // the pane's text when the selection started
 	resizedAt   time.Time  // last details resize; its width shows in the bottom bar briefly
+	statusAt    time.Time  // when status was set; it clears statusShown later
+	statusSeq   int        // bumped by setStatus, so a message set again gets its full time
 	helpTop     int        // first visible help line when it must scroll
 	sessions    []agents.Session
 	targets     map[string]mux.Target
@@ -157,6 +160,7 @@ type Model struct {
 	cur         int
 	filter      string
 	filtering   bool
+	hideExited  bool            // "h": leave closed sessions out of the list
 	editing     *agents.Session // session being renamed
 	editBuf     string
 	agentRename map[string]bool // sessions with an agent rename in flight
@@ -195,7 +199,11 @@ func New(opts Options, cfgPath string) Model {
 
 func (m Model) Init() tea.Cmd {
 	go watch(m.events, m.cfgEvents, m.cfgPath)
-	return tea.Batch(load, tick(), waitFS(m.events), waitConfig(m.cfgEvents))
+	var expire tea.Cmd
+	if m.status != "" {
+		expire = statusExpiry(m.statusAt) // a message set before start (a config error)
+	}
+	return tea.Batch(load, tick(), waitFS(m.events), waitConfig(m.cfgEvents), expire)
 }
 
 func load() tea.Msg {
@@ -295,7 +303,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	nm, cmd := m.update(msg)
 	mm := nm.(Model)
 	mm.scroll()
-	return mm, tea.Batch(cmd, mm.wantDetails())
+	var expire tea.Cmd
+	if mm.status != "" && mm.statusSeq != m.statusSeq { // set during this update, even to the same text
+		mm.statusAt = time.Now()
+		expire = statusExpiry(mm.statusAt)
+	}
+	return mm, tea.Batch(cmd, mm.wantDetails(), expire)
+}
+
+// setStatus shows msg in the bottom bar for statusShown.
+func (m *Model) setStatus(msg string) {
+	m.status = msg
+	m.statusSeq++
+}
+
+// statusShown is how long a message stays in the bottom bar.
+const statusShown = 2500 * time.Millisecond
+
+type statusExpiredMsg struct{ at time.Time }
+
+func statusExpiry(at time.Time) tea.Cmd {
+	return tea.Tick(statusShown, func(time.Time) tea.Msg { return statusExpiredMsg{at} })
 }
 
 // wantDetails loads details for the selected session when the pane shows and
@@ -345,11 +373,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.at.Equal(m.resizedAt) {
 			m.resizedAt = time.Time{}
 		}
+	case statusExpiredMsg:
+		if msg.at.Equal(m.statusAt) { // a newer message keeps its own time
+			m.status = ""
+		}
 	case copiedMsg:
 		if msg.err != "" {
-			m.status = "copy failed: " + msg.err
+			m.setStatus("copy failed: " + msg.err)
 		} else {
-			m.status = fmt.Sprintf("copied %d characters (%s)", msg.n, msg.via)
+			m.setStatus(fmt.Sprintf("copied %d characters (%s)", msg.n, msg.via))
 		}
 		if m.peek != nil {
 			m.peek.msg = m.status // the footer shows the popup's keys, so say it inside the popup
@@ -357,22 +389,22 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case configMsg:
 		opts, err := config.Load(m.cfgPath)
 		if err != nil {
-			m.status = "config not applied: " + err.Error() // keep the current settings
+			m.setStatus("config not applied: " + err.Error()) // keep the current settings
 			return m, waitConfig(m.cfgEvents)
 		}
 		return m, tea.Batch(m.applyOptions(opts), waitConfig(m.cfgEvents))
 	case statusMsg:
-		m.status = string(msg)
+		m.setStatus(string(msg))
 	case renameDoneMsg:
 		delete(m.renaming, msg.key)
 		if msg.err != "" {
 			m.rename[msg.key] = true
-			m.status = "rename: " + msg.err
+			m.setStatus("rename: " + msg.err)
 		}
 	case openFailedMsg:
 		delete(m.pending, msg.key)
 		if msg.err != "" {
-			m.status = "open: " + msg.err
+			m.setStatus("open: " + msg.err)
 		}
 	case detailsMsg:
 		delete(m.detailsBusy, msg.key)
@@ -387,12 +419,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case renamedMsg:
 		delete(m.agentRename, msg.key)
 		if msg.err != "" {
-			m.status = "rename: " + msg.err
+			m.setStatus("rename: " + msg.err)
 			return m, nil
 		}
-		m.status = "renamed to " + msg.name
+		m.setStatus("renamed to " + msg.name)
 		if msg.note != "" {
-			m.status += "; " + msg.note
+			m.setStatus(m.status + "; " + msg.note)
 		}
 		return m, m.reload()
 	case loadedMsg:
@@ -406,7 +438,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			again = m.reload()
 		}
 		if msg.err != nil {
-			m.status = "load: " + msg.err.Error() // other agents' sessions still shown
+			m.setStatus("load: " + msg.err.Error()) // other agents' sessions still shown
 		}
 		cmd := m.syncNames(msg.sessions, msg.targets)
 		m.sessions, m.targets = msg.sessions, msg.targets
@@ -620,7 +652,7 @@ func (m Model) syncNames(ss []agents.Session, targets map[string]mux.Target) tea
 
 // WithStatus returns m showing msg in the bottom bar (e.g. a startup problem).
 func (m Model) WithStatus(msg string) Model {
-	m.status = msg
+	m.setStatus(msg)
 	return m
 }
 
@@ -715,7 +747,7 @@ func (m Model) saveSettings() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.settings = nil
-	m.status = "settings saved to " + tildify(m.cfgPath)
+	m.setStatus("settings saved to " + tildify(m.cfgPath))
 	return m, m.applyOptions(opts)
 }
 
@@ -749,10 +781,10 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.editing = nil
 			name, err := agents.CleanName(m.editBuf)
 			if err != nil {
-				m.status = "rename: " + err.Error()
+				m.setStatus("rename: " + err.Error())
 				return m, nil
 			}
-			m.status = "renaming…"
+			m.setStatus("renaming…")
 			m.agentRename[s.Key()] = true
 			return m, renameCmd(s, name)
 		case tea.KeyBackspace:
@@ -785,7 +817,14 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "left", "h":
+	case "h":
+		m.hideExited = !m.hideExited
+		m.setStatus("showing exited sessions")
+		if m.hideExited {
+			m.setStatus("exited sessions hidden; h shows them")
+		}
+		m.rebuild()
+	case "left":
 		// Collapse the folder of the current row and land on its header.
 		if r, ok := m.row(); ok {
 			g := r.group
@@ -835,9 +874,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		r, ok := m.row()
 		switch {
 		case !m.opts.Peek:
-			m.status = "the conversation peek is off; turn it on in settings (s)"
+			m.setStatus("the conversation peek is off; turn it on in settings (s)")
 		case !ok || r.s == nil:
-			m.status = "select a session to peek at its conversation"
+			m.setStatus("select a session to peek at its conversation")
 		default:
 			m.peek = &peekView{key: r.s.Key()}
 			return m, m.loadDetails(true)
@@ -845,14 +884,14 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.help = true
 	case "R":
-		m.status = "refreshing…"
+		m.setStatus("refreshing…")
 		clear(m.details) // R also reloads details
 		return m, m.reload()
 	case "r":
 		if r, ok := m.row(); ok && r.s != nil {
 			// One agent rename at a time per session, so two can't land out of order.
 			if m.agentRename[r.s.Key()] {
-				m.status = "a rename of this session is still running"
+				m.setStatus("a rename of this session is still running")
 				return m, nil
 			}
 			s := *r.s
@@ -891,7 +930,7 @@ func (m *Model) open() tea.Cmd {
 	}
 	k := r.s.Key()
 	if t, ok := m.pending[k]; ok && time.Since(t) < 15*time.Second {
-		m.status = "already opening " + r.s.Name
+		m.setStatus("already opening " + r.s.Name)
 		return nil
 	}
 	m.pending[k] = time.Now()
@@ -1039,6 +1078,10 @@ func (m *Model) rebuild() {
 	for i := range m.sessions {
 		s := &m.sessions[i]
 		if f != "" && !strings.Contains(strings.ToLower(s.Name+" "+s.Agent+" "+s.Cwd), f) {
+			continue
+		}
+		// "in use?" sessions stay: something may have them open.
+		if m.hideExited && s.Status == agents.Exited && !s.MaybeLive {
 			continue
 		}
 		if _, ok := groups[s.Cwd]; !ok {
@@ -1221,9 +1264,12 @@ func (m Model) View() string {
 		foot = m.status
 	default:
 		// Resize, fold and mouse keys are left to the ? popup, to keep this line short.
-		foot = "enter open/focus · r rename · R refresh · i details · / filter · s settings · q quit"
+		foot = "⏎ open session · r rename · R refresh · i details · / filter · s settings · q quit"
 		if m.filter != "" {
 			foot = "filter: " + m.filter + " · " + foot
+		}
+		if m.hideExited {
+			foot = `"exited" sessions hidden · ` + foot
 		}
 		foot = "? keys · " + foot // first, so it survives truncation in a narrow window
 		foot = dim.Render(foot)
@@ -1492,13 +1538,8 @@ func (m Model) detailLines(w, n int) []string {
 	switch {
 	case !ok:
 	case r.s == nil:
-		n := 0
-		for _, s := range m.sessions {
-			if s.Cwd == r.group {
-				n++
-			}
-		}
-		body = append(pathLines("Folder", r.group), label("Sessions", fmt.Sprint(n)))
+		// The count the folder header shows: after the filter and h.
+		body = append(pathLines("Folder", r.group), label("Sessions", fmt.Sprint(m.counts[r.group])))
 	default:
 		s := r.s
 		body = []string{
