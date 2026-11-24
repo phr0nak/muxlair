@@ -7,16 +7,21 @@
 
 ![muxlair listing coding-agent sessions grouped by folder, with a details pane](docs/screenshot.png)
 
-A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists your Claude Code, Codex, OpenCode, pi and Antigravity (`agy`) sessions, grouped by the folder they ran in. From there you can jump to a running session, reopen an old one or rename it, with the keyboard or the mouse. It runs inside [`tmux`](https://github.com/tmux/tmux), [`cmux`](https://cmux.com) or `rex`.
+A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists your Claude Code, Codex, OpenCode, Pi and Antigravity sessions, grouped by the folder they ran in. From there you can jump to a running session, reopen an old one or rename it, with the keyboard or the mouse. It runs inside [`tmux`](https://github.com/tmux/tmux), [`cmux`](https://cmux.com) or [`rex`](https://www.superlogical.com/).
 
 ### Why "muxlair"?
 
-**mux**, from *multiplexer*, as in `tmux`: many terminal sessions behind one interface. **lair**: a den where your agents live and work. Together, a home base for your coding-agent sessions.
+The name joins two words:
+
+- **mux**, from *multiplexer*, as in `tmux`: many terminal sessions managed through one interface.
+- **lair**, a hidden base or den: a dedicated place where your AI agents live and work.
+
+Together, a home base for your coding-agent sessions.
 
 ## Quick start
 
 1. [Install](#install) `muxlair`.
-2. Open a `tmux`, `cmux` or `rex` terminal and run `muxlair` in it.
+2. Open a `tmux`, `cmux` or `rex` terminal, and run `muxlair` in it.
 3. Move to a session with the arrow keys and press `Enter`: `muxlair` jumps to it if it's open, or reopens it if it's closed.
 4. Press `?` for every key, and `s` for settings.
 
@@ -27,7 +32,7 @@ A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists yo
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` |
 | [Codex CLI](https://github.com/openai/codex) | `codex` |
 | [OpenCode](https://opencode.ai) | `opencode` |
-| [pi](https://github.com/earendil-works/pi) | `pi` |
+| [Pi](https://github.com/earendil-works/pi) | `pi` |
 | [Antigravity CLI](https://antigravity.google) | `agy` |
 
 Not every feature works the same for every agent. See [Agent support](#agent-support).
@@ -42,8 +47,8 @@ Not every feature works the same for every agent. See [Agent support](#agent-sup
   | `busy` | The agent is working. |
   | `idle` | Open and waiting for you. |
   | `exited` | Closed. It can be reopened. |
-  | `dead` | Codex can no longer reopen it: its session file is gone. |
-  | `in use?` | An agent process that `muxlair` can't identify may have it open, so `muxlair` won't open or rename it. |
+  | `dead` | Codex can no longer reopen it as its session file is gone. |
+  | `in use?` | An unrecognized agent process may have this file open, preventing `muxlair` from opening or renaming it. |
 
 - **Jump or reopen** with `Enter`, in the terminal `muxlair` runs in:
 
@@ -85,7 +90,7 @@ go build -o muxlair ./cmd/muxlair
 mkdir -p ~/.local/bin && cp muxlair ~/.local/bin/
 ```
 
-If `muxlair` isn't found afterwards, add `~/.local/bin` to your `PATH` in your shell's startup file (such as `~/.zshrc` or `~/.bashrc`), then open a new terminal:
+If `muxlair` isn't found afterwards, add `~/.local/bin` to your `$PATH` in your shell's startup file (such as `~/.zshrc` or `~/.bashrc`), then open a new terminal:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
@@ -127,14 +132,14 @@ Anything else exits with status 2 and an error message.
 
 | Column | Meaning |
 |---|---|
-| `STATUS` | `busy`, `idle` or `exited` |
-| `ID` | The agent's session ID |
-| `UPDATED` | Last activity, `YYYY-MM-DD HH:MM` |
-| `AGENT` | `claude`, `codex`, `opencode`, `pi` or `agy` |
-| `TTY` | The session's terminal, empty when it isn't running |
-| `MAYBELIVE` | `true` when the session shows `in use?` |
-| `CWD` | The folder the session ran in |
-| `NAME` | The session name, cut to its first six words (`…` marks a cut) |
+| `STATUS` | `busy`, `idle` or `exited`. |
+| `ID` | The agent's session ID. |
+| `UPDATED` | Last activity, `YYYY-MM-DD HH:MM`. |
+| `AGENT` | `claude`, `codex`, `opencode`, `pi` or `agy`. |
+| `TTY` | The session's terminal, empty when it isn't running. |
+| `MAYBELIVE` | `true` when the session shows `in use?`. |
+| `CWD` | The folder the session ran in. |
+| `NAME` | The session name. |
 
 ## Configuration
 
@@ -153,7 +158,7 @@ Settings are saved in `~/.muxlair/config.json`. You can also edit that file; `mu
 
 | Setting | Default | What it does |
 |---|---|---|
-| `mouse` | `true` | Mouse support. To select text outside the details pane, most terminals need `Shift` held. |
+| `mouse` | `true` | Mouse support. |
 | `color_tabs` | `true` | Tints the window (`tmux`) or workspace (`cmux`) that `muxlair` opens with the agent's color. `rex` tabs have no color. |
 | `details` | `true` | Shows the details pane at startup. It needs a window at least 90 columns wide. |
 | `conversation_peek` | `true` | Shows the latest exchange. When `false`, `muxlair` reads no conversation text at all. |
@@ -169,8 +174,8 @@ It is the real text from the agent's own files, never a summary. Control charact
 | Claude Code | The session transcript | Tool calls and output, reasoning, subagents, slash commands |
 | Codex | The session file | Tool calls and output, reasoning |
 | OpenCode | OpenCode's database | Tool output, reasoning |
-| pi | The session file (the branch pi shows) | Tool calls, thinking |
-| agy | The conversation log | Tool steps |
+| Pi | The session file (the branch pi shows) | Tool calls, thinking |
+| Antigravity | The conversation log | Tool steps |
 
 An answer that stopped early (interrupted, or at a tool call) is marked as such, and a busy session shows "working…".
 
@@ -185,17 +190,16 @@ An answer that stopped early (interrupted, or at a tool call) is marked as such,
 | Claude Code | `~/.claude` | Appends the record `/rename` writes | Types `/rename <name>` |
 | Codex | `~/.codex` or `$CODEX_HOME` | Codex's app server | Types `/rename <name>`, else the app server |
 | OpenCode | `~/.local/share/opencode/opencode.db`, or under `$XDG_DATA_HOME` (read-only) | OpenCode's server (`opencode api`) | OpenCode's server |
-| pi | `~/.pi/agent/sessions`, or where pi's settings put them | pi itself (`pi --mode rpc`; no model is called) | Not possible: use `/name` in pi |
-| agy | `~/.gemini/antigravity-cli` (read-only) | Not possible: open it first | Types `/rename <name>` |
+| Pi | `~/.pi/agent/sessions`, or where `pi`'s settings put them | Pi itself (`pi --mode rpc`; no model is called) | Not possible: use `/name` in `pi` |
+| Antigravity | `~/.gemini/antigravity-cli` (read-only) | Not possible: open it first | Types `/rename <name>` |
 
-- **Typing a command** into a session's terminal happens only when the session is idle and its input box is empty, so nothing you're typing gets sent.
+- **Typing a command** into a session's terminal happens only when the session is `idle` and its input box is empty, so nothing you're typing gets sent.
 - **Reopening** a session starts the agent itself in a new terminal. The agents are separate programs and do what they normally do.
 - **Other commands** `muxlair` runs: `tmux`, `cmux` or `rex` to find, open and rename terminals, and `ps` and `lsof` to see which sessions are running.
 - **Its own file** is `~/.muxlair/config.json`.
 
 ## Troubleshooting
 
-- **A `cmux` session can't be reached from `muxlair` running outside `cmux`.** By default, `cmux` only accepts commands from programs started inside it. Run `muxlair` inside `cmux`, or change `cmux`'s socket control setting.
 - **`Enter` selects a `rex` tab but the `rex` app doesn't switch to it.** Turn on Remote Control in the `rex` app's Settings, under Rex Server.
 - **A session shows `in use?`.** An agent process that `muxlair` can't match to a session runs in that folder, for example one in its session picker. Close it, or wait for it to finish.
 - **Every Codex session shows `in use?`.** `muxlair` needs `lsof` to match Codex processes to sessions. Install `lsof`.
@@ -207,7 +211,7 @@ An answer that stopped early (interrupted, or at a tool call) is marked as such,
 
 ✓ supported · ◐ partly · ✗ not supported
 
-| Feature | Claude Code | Codex | OpenCode | pi | agy |
+| Feature | Claude Code | Codex | OpenCode | Pi | Antigravity |
 |---|---|---|---|---|---|
 | List sessions | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Reopen a closed session | ✓ | ◐ ¹ | ✓ | ◐ ² | ✓ |
@@ -220,20 +224,19 @@ An answer that stopped early (interrupted, or at a tool call) is marked as such,
 | Conversation peek | ✓ | ✓ | ✓ | ✓ | ◐ ⁶ |
 
 1. Not a `dead` session: its file is gone.
-2. A running pi doesn't say which session it has open, so every pi session in its folder shows `in use?` until it exits.
-3. Jumping and `idle` need an OpenCode started as `opencode -s <id>`, as `muxlair` starts it; `busy` comes from OpenCode's database. A plain `opencode` isn't matched, so `Enter` opens a second view, which OpenCode keeps in sync.
-4. agy can't rename a closed conversation from outside. `r` asks you to open it first.
-5. Codex records a token total, not the split by kind.
+2. A running `pi` doesn't say which session it has open, so every `pi` session in its folder shows `in use?` until it exits.
+3. Jumping and `idle` need an `opencode` session started as `opencode -s <id>`, as `muxlair` starts it; `busy` comes from `opencode`'s database. A plain `opencode` isn't matched, so `Enter` opens a second view, which `opencode` keeps in sync.
+4. `agy` can't rename a closed conversation from outside. `r` asks you to open it first.
+5. `codex` records a token total, not the split by kind.
 6. Only for conversations with a log on this machine.
 
 ### Other limitations
 
-- **Agent files can change.** `muxlair` reads the agents' own files and databases, which are not stable interfaces. An agent update can break listing, names or details until `muxlair` catches up.
-- **Platforms.** Developed and tested on macOS. Linux is untested, and Windows is not supported. On Linux, a Codex session run through Codex's shared app-server daemon can't be matched to its terminal, so jump and rename-in-place don't work for it.
+- **Platforms.** Developed and tested on macOS. Linux is partially tested only. Windows is not supported.
 - **`rex` tabs have no color**, so `color_tabs` only applies in `tmux` and `cmux`.
 
 ## License
 
 `muxlair` is released under the [MIT License](LICENSE).
 
-`muxlair` is an independent project. It is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI, Google, or the makers of OpenCode or pi. Claude, Claude Code, Codex, OpenCode, pi, Antigravity and other product names are trademarks of their respective owners.
+`muxlair` is an independent project. It is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI, Google, or the makers of OpenCode or Pi. Claude, Claude Code, Codex, OpenCode, Pi, Antigravity and other product names are trademarks of their respective owners.
