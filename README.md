@@ -189,10 +189,11 @@ An answer that stopped early (interrupted, or at a tool call) is marked as such,
 |---|---|---|---|
 | Claude Code | `~/.claude` | Appends the record `/rename` writes | Types `/rename <name>` |
 | Codex | `~/.codex` or `$CODEX_HOME` | Codex's app server | Types `/rename <name>`, else the app server |
-| OpenCode | `~/.local/share/opencode/opencode.db`, or under `$XDG_DATA_HOME` (read-only) | OpenCode's server (`opencode api`) | OpenCode's server |
+| OpenCode | `~/.local/share/opencode/opencode.db`, or under `$XDG_DATA_HOME` | OpenCode's server (`opencode api`) | OpenCode's server |
 | Pi | `~/.pi/agent/sessions`, or where `pi`'s settings put them | Pi itself (`pi --mode rpc`; no model is called) | Not possible: use `/name` in `pi` |
-| Antigravity | `~/.gemini/antigravity-cli` (read-only) | Not possible: open it first | Types `/rename <name>` |
+| Antigravity | `~/.gemini/antigravity-cli` | Not possible: open it first | Types `/rename <name>` |
 
+- **Writes:** `muxlair` writes to one agent's files only: it appends a rename record to a Claude Code transcript. Every other change is made by the agent itself.
 - **Typing a command** into a session's terminal happens only when the session is `idle` and its input box is empty, so nothing you're typing gets sent.
 - **Reopening** a session starts the agent itself in a new terminal. The agents are separate programs and do what they normally do.
 - **Other commands** `muxlair` runs: `tmux`, `cmux` or `rex` to find, open and rename terminals, and `ps` and `lsof` to see which sessions are running.
