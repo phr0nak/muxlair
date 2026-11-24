@@ -22,6 +22,15 @@ type Agent interface {
 
 var registry = []Agent{claudeAgent{}, codexAgent{}, opencodeAgent{}, piAgent{}, agyAgent{}}
 
+// Names lists the supported agents' names, in registry order.
+func Names() []string {
+	var ns []string
+	for _, a := range registry {
+		ns = append(ns, a.Name())
+	}
+	return ns
+}
+
 // ByName returns the agent whose Name is name.
 func ByName(name string) (Agent, bool) {
 	for _, a := range registry {
