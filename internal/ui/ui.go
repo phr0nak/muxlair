@@ -919,6 +919,9 @@ func (m *Model) open(workspace bool) tea.Cmd {
 				return openFailedMsg{k, "session is running " + where + ", likely in cmux, which only lets processes started inside cmux " +
 					"control it; set cmux's socket control mode to password (Settings > Automation) or run muxlair inside cmux"}
 			}
+			if mux.Current() == "rex" {
+				return openFailedMsg{k, "session is running " + where + "; muxlair can't jump to Rex tabs yet, only open closed sessions in new ones"}
+			}
 			return openFailedMsg{k, "session is running " + where + ", which is not a tmux pane or cmux tab"}
 		case s.MaybeLive:
 			return openFailedMsg{k, "an unidentified " + s.Agent + " process in this folder may already run this session"}

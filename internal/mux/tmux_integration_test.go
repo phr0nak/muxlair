@@ -157,3 +157,38 @@ func TestTmuxSendLineReportsUntakenLine(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A Rex tab can inherit TMUX from the shell that started the Rex server; then
+// muxlair is not in that tmux pane and must open Rex tabs. Runs against a
+// private tmux server.
+func TestInheritedTmuxInRexPicksRex(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("no tmux")
+	}
+	sock := t.TempDir() + "/sock"
+	if out, err := exec.Command("tmux", "-S", sock, "new-session", "-d", "-s", "it").CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	defer exec.Command("tmux", "-S", sock, "kill-server").Run()
+	pane, err := exec.Command("tmux", "-S", sock, "display-message", "-p", "#{pane_id}").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMUX", sock+",0,0")
+	t.Setenv("TMUX_PANE", strings.TrimSpace(string(pane)))
+	t.Setenv("REX_SESSION", "session:1")
+	paneTTY, _ := exec.Command("tmux", "-S", sock, "display-message", "-p", "#{pane_tty}").Output()
+	defer func(f func() (string, error)) { ownTTY = f }(ownTTY)
+	ownTTY = func() (string, error) { return "/dev/ttys-not-that-pane", nil }
+	if got := Current(); got != "rex" {
+		t.Fatalf("muxlair is not in that pane: got %q", got)
+	}
+	ownTTY = func() (string, error) { return strings.TrimSpace(string(paneTTY)), nil }
+	if got := Current(); got != "tmux" {
+		t.Fatalf("tmux inside a Rex tab: got %q", got)
+	}
+	t.Setenv("REX_SESSION", "")
+	if got := Current(); got != "tmux" {
+		t.Fatalf("plain tmux: got %q", got)
+	}
+}

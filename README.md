@@ -7,7 +7,7 @@
 
 ![muxlair listing Claude Code and Codex sessions grouped by folder, with a details pane](docs/screenshot.png)
 
-A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists your Claude Code and Codex sessions grouped by the folder they ran in. From there you can jump to a running session, reopen an old one or rename it, using the keyboard or the mouse, inside [tmux](https://github.com/tmux/tmux) or [cmux](https://cmux.com).
+A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists your Claude Code and Codex sessions grouped by the folder they ran in. From there you can jump to a running session, reopen an old one or rename it, using the keyboard or the mouse, inside [tmux](https://github.com/tmux/tmux) or [cmux](https://cmux.com). In Rex, it can open closed sessions in new tabs.
 
 ### Why "muxlair"?
 
@@ -21,7 +21,7 @@ Together, a home base for all your AI coding-agent sessions.
 ## Quick start
 
 1. [Install](#install) `muxlair`.
-2. Start a `tmux` session or open a `cmux` terminal, then run `muxlair` in it. `muxlair` needs one of the two to open sessions.
+2. Start a `tmux` session or open a `cmux` or Rex terminal, then run `muxlair` in it. `muxlair` needs one of them to open sessions.
 3. Move to a session with the arrow keys and press `Enter`: `muxlair` jumps to it if it's open, or reopens it if it's closed.
 4. Press `?` to see every key, and `s` for settings.
 
@@ -46,7 +46,7 @@ Together, a home base for all your AI coding-agent sessions.
   | `in use?` | An agent process `muxlair` can't identify may be using it, so `muxlair` won't open it. Codex only. |
 
 - **Jump or reopen.** 
-  - `Enter` on an open session takes you to its `tmux` window or `cmux` pane. On a closed one, it reopens the session in a new `tmux` window or `cmux` pane.
+  - `Enter` on an open session takes you to its `tmux` window or `cmux` pane. On a closed one, it reopens the session in a new `tmux` window, `cmux` pane or Rex tab. In Rex, `muxlair` can't jump to a session that is already open yet.
   - `w` on an open session takes you to its `cmux` workspace. On a closed one, it reopens the session in a new `cmux` workspace.
 - **Rename** with `r`. The new name is applied in the agent too. Renaming inside the agent, with `/rename`, updates `muxlair` right away, along with the title of its `tmux` window or `cmux` tab, and its `cmux` workspace when the session is the only terminal in it.
 - **Details pane** with the session's ID, folder, file location, start time, last activity, model, token usage and cost, when the agent records them.
@@ -57,7 +57,7 @@ Together, a home base for all your AI coding-agent sessions.
 ## Requirements
 
 - [Go](https://go.dev/dl/) 1.27.1 or newer, to build `muxlair`.
-- `tmux` and/or `cmux`. `muxlair` runs inside one of them and opens sessions there.
+- `tmux`, `cmux` or Rex. `muxlair` runs inside one of them and opens sessions there. In Rex it only opens closed sessions in new tabs (see [Known limitations](#known-limitations)).
 - For copying details text: a clipboard command (`pbcopy`, `wl-copy`, `xclip` or `xsel`), or a terminal that supports clipboard access (OSC 52). Inside `tmux`, the latter needs `set -g set-clipboard on`.
 - The agents you use, installed and on your `PATH` (`claude`, `codex`). Sessions of both agents can be reopened and renamed.
 
@@ -113,7 +113,7 @@ Press `?` in `muxlair` to see these at any time.
 
 | Command | What it does |
 |---|---|
-| `muxlair` | Starts the dashboard. Run it inside `tmux` or `cmux`. |
+| `muxlair` | Starts the dashboard. Run it inside `tmux`, `cmux` or Rex. |
 | `muxlair --help` (`-h`) | Shows the usage and exits. |
 | `muxlair --version` (`-v`) | Prints the version and exits. A release prints its tag, such as `v0.1.0`; a build from source prints `dev` or a commit-based version. |
 | `muxlair list` (`--list`) | Prints every session as an aligned table and exits, without starting the dashboard. Useful for debugging or scripting. |
@@ -181,7 +181,7 @@ With the details pane open, the selected session shows a **Latest exchange** blo
 
 ## What `muxlair` reads and changes
 
-`muxlair` makes no network connections of its own. It reads local files and runs local commands: `tmux`, `cmux`, `lsof`, `ps`, and `codex` to rename Codex sessions. Reopening a session starts the agent itself (`claude` or `codex`) in a new terminal; the agents are separate programs and do whatever they normally do.
+`muxlair` makes no network connections of its own. It reads local files and runs local commands: `tmux`, `cmux`, `rex`, `lsof`, `ps`, and `codex` to rename Codex sessions. Reopening a session starts the agent itself (`claude` or `codex`) in a new terminal; the agents are separate programs and do whatever they normally do.
 
 `muxlair` reads each agent's own session files: `~/.claude` for Claude Code, and `~/.codex` (or `$CODEX_HOME`) for Codex. It changes them in only one case:
 
@@ -207,6 +207,7 @@ With the details pane open, the selected session shows a **Latest exchange** blo
 - **Agent file formats can change.** `muxlair` reads Claude Code's and Codex's own files (transcripts, session records, Codex's databases). These are not stable, documented interfaces, so an agent update can break session discovery, names or the details pane until `muxlair` catches up.
 - **Platforms.** `muxlair` is developed and tested on macOS only. It has not been tested on Linux, and may not work there yet. Known issue: if Codex runs with its shared app-server daemon, a running Codex session can't be matched to its terminal, so jump and rename-in-place don't work for it. Windows is not supported.
 - **Only Claude Code and Codex.** Other agents are not supported yet.
+- **Rex support is partial.** Inside Rex, `muxlair` opens closed sessions in a new tab of the Rex session it runs in. It can't jump to a session that is already open in a Rex tab, `w` still needs `cmux`, and Rex tabs get no agent color.
 
 ## License
 
