@@ -1,11 +1,9 @@
 package ui
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -211,42 +209,6 @@ func TestDragClamped(t *testing.T) {
 	}
 }
 
-func TestAutoDeleteSelection(t *testing.T) {
-	m := New(Options{AutoDelete: 10 * time.Minute}, "")
-	old := time.Now().Add(-time.Hour)
-	m.sessions = []agents.Session{
-		{Agent: "codex", ID: "headless-old", Headless: true, Updated: old},
-		{Agent: "claude", ID: "headless-running", Headless: true, PID: 1, Updated: old},
-		{Agent: "codex", ID: "headless-maybe", Headless: true, MaybeLive: true, Updated: old},
-		{Agent: "claude", ID: "headless-recent", Headless: true, Updated: time.Now()},
-		{Agent: "claude", ID: "interactive-old", Updated: old},
-	}
-	if m.autoDelete() == nil || !m.autoBusy {
-		t.Fatal("no batch for an old exited headless session")
-	}
-	m.rebuild()
-	for i, r := range m.rows {
-		if r.s != nil && r.s.ID == "headless-old" {
-			m.cur = i
-		}
-	}
-	if m.open(false) != nil {
-		t.Fatal("opened a session that is being auto-deleted")
-	}
-	if m.autoDelete() != nil {
-		t.Fatal("started a second batch while one runs")
-	}
-	m.autoBusy = false
-	m.autoDel["codex:headless-old"] = true // failed before
-	if m.autoDelete() != nil {
-		t.Fatal("retried a failed session, or picked an ineligible one")
-	}
-	off := New(Options{}, "")
-	if off.autoDelete() != nil {
-		t.Fatal("ran with auto-delete off")
-	}
-}
-
 func TestSettingsPopup(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "config.json")
 	m := New(config.Defaults(), cfg)
@@ -275,8 +237,7 @@ func TestSettingsPopup(t *testing.T) {
 	key("down")
 	key("down")
 	key("down")
-	key("down")
-	key("right") // auto-delete 10m -> 30m
+	key("right") // conversation peek off
 	key("esc")
 	if m.settings != nil || !m.opts.Mouse {
 		t.Fatal("esc applied changes")
@@ -289,11 +250,10 @@ func TestSettingsPopup(t *testing.T) {
 	key("down")
 	key("down")
 	key("down")
-	key("down")
 	key("right")
 	key("down") // Save
 	key("enter")
-	if m.settings != nil || m.opts.Mouse || m.opts.AutoDelete != 30*time.Minute {
+	if m.settings != nil || m.opts.Mouse || m.opts.Peek {
 		t.Fatalf("save not applied: %+v", m.opts)
 	}
 	got, err := config.Load(cfg)
@@ -320,22 +280,6 @@ func TestConfigReload(t *testing.T) {
 	}
 }
 
-func TestAutoDeleteChoicesKeepCustom(t *testing.T) {
-	c := autoDeleteChoices(90 * time.Second)
-	found := false
-	for i, d := range c {
-		if d == 90*time.Second {
-			found = true
-		}
-		if i > 0 && c[i-1] >= d {
-			t.Fatal("not sorted")
-		}
-	}
-	if !found {
-		t.Fatal("custom value dropped")
-	}
-}
-
 func TestSettingsClickOverDivider(t *testing.T) {
 	m := New(config.Defaults(), filepath.Join(t.TempDir(), "config.json"))
 	m.height, m.width = 30, 120
@@ -344,18 +288,6 @@ func TestSettingsClickOverDivider(t *testing.T) {
 	nm, _ := m.Update(tea.MouseMsg{X: lw + 1, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
 	if nm.(Model).dragging {
 		t.Fatal("click inside the settings popup started a divider drag")
-	}
-}
-
-func TestAutoDeleteMessagesUseIDs(t *testing.T) {
-	m := New(Options{}, "")
-	nm, _ := m.Update(autoDeletedMsg{deleted: []string{"codex 01a18e76-b797"}})
-	if s := nm.(Model).status; s != "auto-deleted codex 01a18e76-b797 (in ~/.muxlair/trash)" {
-		t.Fatalf("one: %q", s)
-	}
-	nm, _ = m.Update(autoDeletedMsg{failed: []string{"codex:x"}, err: "codex 01a18e76-b797: boom"})
-	if s := nm.(Model).status; s != "auto-delete codex 01a18e76-b797: boom" {
-		t.Fatalf("failed: %q", s)
 	}
 }
 
@@ -373,8 +305,8 @@ func TestHelpPopup(t *testing.T) {
 	if !m.help || !strings.Contains(v, "Keys") || !strings.Contains(v, "resize details") {
 		t.Fatalf("? did not show the keys popup:\n%s", v)
 	}
-	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
-	if m = nm.(Model); m.help || m.confirm != nil {
+	nm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if m = nm.(Model); m.help || m.settings != nil {
 		t.Fatal("a key closing help also acted on the list")
 	}
 }
@@ -606,17 +538,6 @@ func TestLongNameCappedAndResizeClearsSelection(t *testing.T) {
 	}
 }
 
-func TestXDoesNotDelete(t *testing.T) {
-	m := New(Options{}, "")
-	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Cwd: "/a", Updated: time.Now()}}
-	m.rebuild()
-	m.cur = 1
-	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	if nm.(Model).confirm != nil {
-		t.Fatal("x opened the delete prompt")
-	}
-}
-
 func TestSelectionGuards(t *testing.T) {
 	m := New(Options{Details: true}, "")
 	m.height, m.width = 30, 120
@@ -627,12 +548,12 @@ func TestSelectionGuards(t *testing.T) {
 	press := tea.MouseMsg{X: lw + 15, Y: 3, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
 	// A popup is modal: no selection underneath it.
 	s := m.sessions[0]
-	m.confirm = &s
+	m.editing = &s
 	nm, _ := m.Update(press)
 	if nm.(Model).sel != nil {
-		t.Fatal("selection started behind the delete popup")
+		t.Fatal("selection started behind the rename popup")
 	}
-	m.confirm = nil
+	m.editing = nil
 	nm, _ = m.Update(press)
 	m = nm.(Model)
 	if m.sel == nil {
@@ -702,22 +623,6 @@ func TestRenamedNoteShownInStatus(t *testing.T) {
 	}
 }
 
-// putTrash writes a trash entry the way agents.Trash does; files maps a name in
-// the entry to the original path it came from.
-func putTrash(t *testing.T, agent, id, name string, at time.Time, files map[string]string) string {
-	t.Helper()
-	dir := filepath.Join(agents.TrashDir(), agent, at.Format("20060102-150405")+"-"+id)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for f := range files {
-		os.WriteFile(filepath.Join(dir, f), []byte("x\n"), 0o600)
-	}
-	b, _ := json.Marshal(map[string]any{"agent": agent, "id": id, "name": name, "cwd": "/p", "deletedAt": at, "files": files})
-	os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o600)
-	return dir
-}
-
 func press(m tea.Model, k string) (Model, tea.Cmd) {
 	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
 	return nm.(Model), cmd
@@ -728,501 +633,6 @@ func pressType(m tea.Model, ty tea.KeyType) (Model, tea.Cmd) {
 	return nm.(Model), cmd
 }
 
-// "t" opens the trash, enter restores the selected entry, and an entry with
-// nothing to put back says so instead of trying.
-func TestTrashPopupRestoresAndExplains(t *testing.T) {
-	agents.Home = t.TempDir()
-	orig := filepath.Join(agents.Home, ".claude", "projects", "-p", "aaa.jsonl")
-	now := time.Now()
-	putTrash(t, "claude", "aaa", "Fix the bug", now, map[string]string{"0-aaa.jsonl": orig})
-	putTrash(t, "codex", "bbb", "Dead one", now.Add(-time.Hour), nil) // no session file
-
-	m := New(Options{}, "")
-	m.height, m.width = 30, 100
-	m, _ = press(m, "t")
-	if m.trash == nil || len(m.trash.rows) != 2 {
-		t.Fatalf("popup not open with 2 entries: %+v", m.trash)
-	}
-	v := m.View()
-	for _, want := range []string{"Trash", "RESTORABLE", "RESTORED", "Fix the bug", "Dead one", "enter restore"} {
-		if !strings.Contains(ansi.Strip(v), want) {
-			t.Fatalf("view lacks %q:\n%s", want, ansi.Strip(v))
-		}
-	}
-
-	// The dead codex entry (second line) can't be restored.
-	m, _ = press(m, "j")
-	m, cmd := pressType(m, tea.KeyEnter)
-	if cmd != nil || !m.trash.isErr || !strings.Contains(m.trash.msg, "can't be restored") {
-		t.Fatalf("dead entry: cmd=%v msg=%q", cmd != nil, m.trash.msg)
-	}
-
-	// The Claude entry (first line) is restored for real.
-	m, _ = press(m, "k")
-	m, cmd = pressType(m, tea.KeyEnter)
-	if cmd == nil || !m.restoring {
-		t.Fatal("restore did not start")
-	}
-	if _, again := pressType(m, tea.KeyEnter); again != nil {
-		t.Fatal("a second restore started while one was running")
-	}
-	nm, _ := m.Update(cmd())
-	m = nm.(Model)
-	if _, err := os.Stat(orig); err != nil {
-		t.Fatalf("transcript not back: %v", err)
-	}
-	if m.trash == nil || len(m.trash.rows) != 1 || m.trash.isErr || !strings.Contains(m.trash.msg, "restored Fix the bug") {
-		t.Fatalf("after restore: %+v", m.trash)
-	}
-
-	m, _ = pressType(m, tea.KeyEsc)
-	if m.trash != nil {
-		t.Fatal("esc did not close the popup")
-	}
-}
-
-// Restoring the last entry closes the popup and says so in the bottom bar.
-func TestTrashPopupClosesWhenEmpty(t *testing.T) {
-	agents.Home = t.TempDir()
-	orig := filepath.Join(agents.Home, ".claude", "projects", "-p", "aaa.jsonl")
-	putTrash(t, "claude", "aaa", "Only one", time.Now(), map[string]string{"0-aaa.jsonl": orig})
-	m := New(Options{}, "")
-	m.height, m.width = 30, 100
-	m, _ = press(m, "t")
-	m, cmd := pressType(m, tea.KeyEnter)
-	nm, _ := m.Update(cmd())
-	m = nm.(Model)
-	if m.trash != nil || !strings.Contains(m.status, "restored Only one") {
-		t.Fatalf("trash=%v status=%q", m.trash, m.status)
-	}
-}
-
-func TestTrashEmptyAndFailure(t *testing.T) {
-	agents.Home = t.TempDir()
-	m := New(Options{}, "")
-	m.height, m.width = 30, 100
-	m, _ = press(m, "t")
-	if m.trash != nil || m.status != "the trash is empty" {
-		t.Fatalf("empty trash: trash=%v status=%q", m.trash, m.status)
-	}
-
-	// A restore that fails (the destination already exists) keeps the popup and shows why.
-	orig := filepath.Join(agents.Home, ".claude", "projects", "-p", "aaa.jsonl")
-	putTrash(t, "claude", "aaa", "Taken", time.Now(), map[string]string{"0-aaa.jsonl": orig})
-	os.MkdirAll(filepath.Dir(orig), 0o700)
-	os.WriteFile(orig, []byte("new"), 0o600)
-	m, _ = press(m, "t")
-	m, cmd := pressType(m, tea.KeyEnter)
-	nm, _ := m.Update(cmd())
-	m = nm.(Model)
-	if m.trash == nil || !m.trash.isErr || !strings.Contains(m.trash.msg, "already exists") {
-		t.Fatalf("failed restore: %+v", m.trash)
-	}
-	if b, _ := os.ReadFile(orig); string(b) != "new" {
-		t.Fatal("overwrote the existing file")
-	}
-}
-
-// A restore outlives the popup: reopening it must not allow a second restore
-// to start, and the first one's result still lands.
-func TestTrashRestoreInFlightSurvivesReopen(t *testing.T) {
-	agents.Home = t.TempDir()
-	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
-	putTrash(t, "claude", "aaa", "First", time.Now(), map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
-	putTrash(t, "claude", "bbb", "Second", time.Now().Add(-time.Hour), map[string]string{"0-bbb.jsonl": filepath.Join(proj, "bbb.jsonl")})
-	m := New(Options{}, "")
-	m.height, m.width = 30, 100
-	m, _ = press(m, "t")
-	m, first := pressType(m, tea.KeyEnter) // starts restoring "First"
-	if first == nil || !m.restoring {
-		t.Fatal("restore did not start")
-	}
-	m, _ = pressType(m, tea.KeyEsc)
-	m, _ = press(m, "t") // reopen while it is still running
-	if !strings.Contains(m.trash.msg, "still running") {
-		t.Fatalf("reopened popup does not say a restore is running: %q", m.trash.msg)
-	}
-	m, _ = press(m, "j") // select "Second" and try to restore it as well
-	m, second := pressType(m, tea.KeyEnter)
-	if second != nil {
-		t.Fatal("a second restore started while the first was running")
-	}
-	nm, _ := m.Update(first()) // the first result arrives
-	m = nm.(Model)
-	if m.restoring || m.trash == nil || !strings.Contains(m.trash.msg, "restored First") {
-		t.Fatalf("restoring=%v trash=%+v", m.restoring, m.trash)
-	}
-}
-
-// At the narrowest supported window the rows must stay inside the popup.
-func TestTrashPopupFitsNarrowWindow(t *testing.T) {
-	agents.Home = t.TempDir()
-	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
-	putTrash(t, "claude", "aaaaaaaa-1111", "A fairly long session name for a narrow window", time.Now(), map[string]string{"0-a.jsonl": filepath.Join(proj, "a.jsonl")})
-	for _, width := range []int{44, 50, 60, 100} {
-		m := New(Options{}, "")
-		m.height, m.width = 20, width
-		m, _ = press(m, "t")
-		for i, line := range strings.Split(m.View(), "\n") {
-			if w := ansi.StringWidth(line); w > width {
-				t.Fatalf("width %d: line %d is %d cells wide:\n%s", width, i, w, ansi.Strip(line))
-			}
-		}
-		if !strings.Contains(ansi.Strip(m.View()), "A fa") { // at 44 columns only the start of the name fits
-			t.Fatalf("width %d: the name is not visible:\n%s", width, ansi.Strip(m.View()))
-		}
-	}
-}
-
-// The columns are the ones `muxlair trash` prints, in the same order, with each
-// value centered under its header. Long names are cut, and an empty one says so.
-func TestTrashPopupColumnsAlignedAndNamesCut(t *testing.T) {
-	agents.Home = t.TempDir()
-	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
-	now := time.Now()
-	long := strings.Repeat("very long name ", 8)
-	putTrash(t, "claude", "aaaaaaaa-1", long, now, map[string]string{"0-a.jsonl": filepath.Join(proj, "a.jsonl")})
-	putTrash(t, "claude", "bbbbbbbb-2", "", now.Add(-time.Hour), map[string]string{"0-b.jsonl": filepath.Join(proj, "b.jsonl")})
-	putTrash(t, "codex", "cccccccc-3", "Dead one", now.Add(-2*time.Hour), nil)
-	// An entry that was restored: its meta.json carries restoredAt.
-	dir := putTrash(t, "claude", "dddddddd-4", "Was restored", now.Add(-3*time.Hour), map[string]string{"0-d.jsonl": filepath.Join(proj, "d.jsonl")})
-	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
-	var meta map[string]any
-	json.Unmarshal(b, &meta)
-	meta["restoredAt"] = now
-	b, _ = json.Marshal(meta)
-	os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o600)
-
-	m := New(Options{}, "")
-	m.height, m.width = 30, 140
-	m, _ = press(m, "t")
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	find := func(sub string) (string, bool) {
-		for _, l := range lines {
-			if strings.Contains(l, sub) {
-				return l, true
-			}
-		}
-		return "", false
-	}
-	// span returns the display columns [from, to) of the idx-th word after `after` in line.
-	words := regexp.MustCompile(`\S+`)
-	span := func(line, after string, idx int) (int, int) {
-		at := strings.Index(line, after) + len(after)
-		ws := words.FindAllStringIndex(line[at:], -1)
-		if len(ws) <= idx {
-			t.Fatalf("no word %d after %q in %q", idx, after, line)
-		}
-		return ansi.StringWidth(line[:at+ws[idx][0]]), ansi.StringWidth(line[:at+ws[idx][1]])
-	}
-	mid := func(a, b int) int { return (a + b) / 2 }
-
-	head, ok := find("RESTORABLE")
-	if !ok {
-		t.Fatalf("no header:\n%s", strings.Join(lines, "\n"))
-	}
-	hmid := map[string]int{}
-	last := -1
-	for _, h := range []string{"AGENT", "ID", "DELETED", "RESTORABLE", "RESTORED", "NAME"} {
-		c := strings.Index(head, h)
-		if c <= last {
-			t.Fatalf("header column %s is out of order: %q", h, head)
-		}
-		last = c
-		hmid[h] = mid(ansi.StringWidth(head[:c]), ansi.StringWidth(head[:c+len(h)]))
-	}
-	near := func(what, id string, got, want int) {
-		if d := got - want; d < -1 || d > 1 {
-			t.Errorf("%s of %s is centered at %d, its header at %d (centered columns may differ by 1 cell)", what, id, got, want)
-		}
-	}
-	for _, id := range []string{"aaaaaaaa", "bbbbbbbb", "cccccccc", "dddddddd"} {
-		row, ok := find(id)
-		if !ok {
-			t.Fatalf("no row for %s", id)
-		}
-		ia := ansi.StringWidth(row[:strings.Index(row, id)])
-		near("ID", id, mid(ia, ia+len(id)), hmid["ID"])
-		// words after the id: date (2 words), RESTORABLE, then RESTORED (1 or 2 words), then the name
-		d1, _ := span(row, id, 0)
-		_, d2 := span(row, id, 1)
-		near("DELETED", id, mid(d1, d2), hmid["DELETED"])
-		r1, r2 := span(row, id, 2)
-		want := "yes"
-		switch id {
-		case "cccccccc":
-			want = "no" // no session file
-		case "dddddddd":
-			want = "done" // already restored
-		}
-		if got := row[strings.Index(row, id):]; !strings.Contains(got, " "+want+" ") {
-			t.Fatalf("%s: expected RESTORABLE %q in %q", id, want, row)
-		}
-		near("RESTORABLE", id, mid(r1, r2), hmid["RESTORABLE"])
-	}
-	// The agent value is centered under AGENT; every name starts where NAME does (left-aligned).
-	{
-		row, _ := find("bbbbbbbb")
-		a := strings.Index(row, "claude")
-		near("AGENT", "bbbbbbbb", mid(ansi.StringWidth(row[:a]), ansi.StringWidth(row[:a])+len("claude")), hmid["AGENT"])
-		nameCol := ansi.StringWidth(head[:strings.Index(head, "NAME")])
-		for id, name := range map[string]string{"aaaaaaaa": "very long name", "bbbbbbbb": "(no name)", "cccccccc": "Dead one", "dddddddd": "Was restored"} {
-			r, _ := find(id)
-			if got := ansi.StringWidth(r[:strings.Index(r, name)]); got != nameCol {
-				t.Errorf("name of %s starts at column %d, NAME header at %d", id, got, nameCol)
-			}
-		}
-	}
-	if row, _ := find("dddddddd"); strings.Contains(row, " - ") {
-		t.Errorf("the restored entry should show its restore date, not -: %q", row)
-	}
-	if row, _ := find("aaaaaaaa"); !strings.Contains(row, "very long name") || !strings.Contains(row, "…") || strings.Contains(row, strings.Repeat("very long name ", 4)) {
-		t.Errorf("long name not cut: %q", row)
-	}
-	// The name fills the column (more than the 40 cells muxlair trash allows) and
-	// is cut with an ellipsis only at its end.
-	row, _ := find("aaaaaaaa")
-	n := strings.Index(row, "very long name")
-	cut := strings.TrimSpace(strings.SplitN(row[n:], "│", 2)[0])
-	if got := ansi.StringWidth(cut); got <= 40 || !strings.HasSuffix(cut, "…") {
-		t.Errorf("name is %d cells wide, want it to use the free width (more than 40) and end in an ellipsis: %q", got, cut)
-	}
-	// ... and stops a few cells short of the border (4, plus the cell the ellipsis may leave).
-	if end := strings.Index(row[n:], "│"); end < 0 {
-		t.Errorf("no right border in %q", row)
-	} else if gap := ansi.StringWidth(row[n:n+end]) - ansi.StringWidth(strings.TrimRight(row[n:n+end], " ")); gap < 3 || gap > 6 {
-		t.Errorf("the long name ends %d cells before the border, want about 4: %q", gap, row)
-	}
-}
-
-// "h" inside the trash popup hides the entries that can't be restored, keeps the
-// selected entry selected, and the list index still maps to the right entry.
-func TestTrashHideNonRestorable(t *testing.T) {
-	agents.Home = t.TempDir()
-	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
-	now := time.Now()
-	putTrash(t, "claude", "aaa", "Newest", now, map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
-	putTrash(t, "codex", "bbb", "Dead one", now.Add(-time.Hour), nil) // not restorable
-	putTrash(t, "claude", "ccc", "Oldest", now.Add(-2*time.Hour), map[string]string{"0-ccc.jsonl": filepath.Join(proj, "ccc.jsonl")})
-	// An entry that was already restored still has its files, but enter refuses it.
-	dir := putTrash(t, "codex", "ddd", "Was restored", now.Add(-3*time.Hour), map[string]string{"0-ddd.jsonl": filepath.Join(proj, "ddd.jsonl")})
-	b, _ := os.ReadFile(filepath.Join(dir, "meta.json"))
-	var meta map[string]any
-	json.Unmarshal(b, &meta)
-	meta["restoredAt"] = now
-	b, _ = json.Marshal(meta)
-	os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o600)
-
-	m := New(Options{}, "")
-	m.height, m.width = 30, 120
-	m, _ = press(m, "t")
-	if got := len(m.trash.visible()); got != 4 {
-		t.Fatalf("all 4 entries should be listed, got %d", got)
-	}
-	if !strings.Contains(ansi.Strip(m.View()), "h hide non-restorable") {
-		t.Fatal("the bottom bar does not mention the h key")
-	}
-
-	m, _ = press(m, "h")
-	if got := len(m.trash.visible()); got != 2 {
-		t.Fatalf("after h, the dead and the restored entries should be hidden: %d visible", got)
-	}
-	v := ansi.Strip(m.View())
-	if strings.Contains(v, "Dead one") || strings.Contains(v, "Was restored") || !strings.Contains(v, "Oldest") || !strings.Contains(v, "2 that can't be restored are hidden") || !strings.Contains(v, "h show all") {
-		t.Fatalf("hidden view is wrong:\n%s", v)
-	}
-
-	// Select "Oldest", then toggle: it stays selected whether or not the dead one is shown.
-	m, _ = press(m, "j")
-	sel := func() string { return m.trash.visible()[m.trash.cur].Meta.ID }
-	if sel() != "ccc" {
-		t.Fatalf("selected %s, want ccc", sel())
-	}
-	m, _ = press(m, "h")
-	if len(m.trash.visible()) != 4 || sel() != "ccc" {
-		t.Fatalf("showing all again: %d visible, selected %s", len(m.trash.visible()), sel())
-	}
-	m, _ = press(m, "h")
-	if len(m.trash.visible()) != 2 || sel() != "ccc" {
-		t.Fatalf("hiding again: %d visible, selected %s", len(m.trash.visible()), sel())
-	}
-
-	// With the dead entry hidden, enter restores the entry under the cursor ("Oldest"), not entries[cur].
-	m, cmd := pressType(m, tea.KeyEnter)
-	if cmd == nil {
-		t.Fatal("restore did not start")
-	}
-	nm, _ := m.Update(cmd())
-	m = nm.(Model)
-	if _, err := os.Stat(filepath.Join(proj, "ccc.jsonl")); err != nil {
-		t.Fatalf("the selected entry was not restored: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(proj, "aaa.jsonl")); err == nil {
-		t.Fatal("restored the wrong entry")
-	}
-	if m.trash == nil || !m.trash.hide {
-		t.Fatalf("the popup should stay open and keep hiding: %+v", m.trash)
-	}
-}
-
-// Everything hidden: the popup says so, and the keys don't crash.
-func TestTrashHideEverything(t *testing.T) {
-	agents.Home = t.TempDir()
-	putTrash(t, "codex", "bbb", "Dead one", time.Now(), nil)
-	m := New(Options{}, "")
-	m.height, m.width = 30, 120
-	m, _ = press(m, "t")
-	m, _ = press(m, "h")
-	if len(m.trash.visible()) != 0 || !strings.Contains(ansi.Strip(m.View()), "nothing here can be restored") {
-		t.Fatalf("empty hidden view:\n%s", ansi.Strip(m.View()))
-	}
-	m, cmd := pressType(m, tea.KeyEnter)
-	m, _ = press(m, "j")
-	m, _ = press(m, "k")
-	if cmd != nil {
-		t.Fatal("enter did something with nothing listed")
-	}
-	m, _ = press(m, "h")
-	if len(m.trash.visible()) != 1 {
-		t.Fatal("h should show the entry again")
-	}
-}
-
-// Opening the popup tells the user about "h" when there is something it would hide.
-func TestTrashPopupHintsAtHOnOpen(t *testing.T) {
-	agents.Home = t.TempDir()
-	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
-	putTrash(t, "claude", "aaa", "Fine", time.Now(), map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
-	m := New(Options{}, "")
-	m.height, m.width = 30, 120
-	m, _ = press(m, "t")
-	if strings.Contains(ansi.Strip(m.View()), "press h") {
-		t.Fatal("hinted at h with nothing to hide")
-	}
-	m, _ = pressType(m, tea.KeyEsc)
-
-	putTrash(t, "codex", "bbb", "Dead one", time.Now().Add(-time.Hour), nil)
-	m, _ = press(m, "t")
-	v := ansi.Strip(m.View())
-	if !strings.Contains(v, "1 can't be restored · press h to hide them") {
-		t.Fatalf("no hint on open:\n%s", v)
-	}
-	m, _ = press(m, "h")
-	if v := ansi.Strip(m.View()); !strings.Contains(v, "1 that can't be restored are hidden · press h to show them") {
-		t.Fatalf("no hint after hiding:\n%s", v)
-	}
-	// At the narrowest supported window the note must stay inside the popup.
-	for _, hide := range []bool{true, false} {
-		n := New(Options{}, "")
-		n.height, n.width = 20, 44
-		n, _ = press(n, "t")
-		if hide {
-			n, _ = press(n, "h")
-		}
-		for i, line := range strings.Split(n.View(), "\n") {
-			if w := ansi.StringWidth(line); w > 44 {
-				t.Fatalf("hide=%v: line %d is %d cells wide:\n%s", hide, i, w, ansi.Strip(line))
-			}
-		}
-	}
-}
-
-// The rows are read once: a saved file that disappears while the popup is open
-// does not shift the list under the cursor, so enter still acts on the row the
-// user picked. The restore re-checks the files and says what is missing.
-func TestTrashRowsDoNotShiftUnderTheCursor(t *testing.T) {
-	agents.Home = t.TempDir()
-	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
-	now := time.Now()
-	dirA := putTrash(t, "claude", "aaa", "First", now, map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
-	putTrash(t, "claude", "bbb", "Second", now.Add(-time.Hour), map[string]string{"0-bbb.jsonl": filepath.Join(proj, "bbb.jsonl")})
-	m := New(Options{}, "")
-	m.height, m.width = 30, 120
-	m, _ = press(m, "t")
-	m, _ = press(m, "h")
-	m, _ = press(m, "j")                          // on "Second"
-	os.Remove(filepath.Join(dirA, "0-aaa.jsonl")) // an EARLIER row stops being restorable behind the user's back
-	if got := m.trash.visible()[m.trash.cur].Meta.ID; got != "bbb" {
-		t.Fatalf("the cursor moved to %s", got)
-	}
-	m, cmd := pressType(m, tea.KeyEnter)
-	if cmd == nil {
-		t.Fatal("enter did not start the restore")
-	}
-	nm, _ := m.Update(cmd())
-	m = nm.(Model)
-	if _, err := os.Stat(filepath.Join(proj, "bbb.jsonl")); err != nil {
-		t.Fatalf("the selected entry (Second) was not restored: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(proj, "aaa.jsonl")); err == nil {
-		t.Fatal("restored the wrong entry")
-	}
-
-	// And an entry whose file vanished after the list was built is refused with a reason.
-	m2 := New(Options{}, "")
-	m2.height, m2.width = 30, 120
-	agents.Home = t.TempDir()
-	dir := putTrash(t, "claude", "ccc", "Gone", now, map[string]string{"0-ccc.jsonl": filepath.Join(agents.Home, "x", "ccc.jsonl")})
-	m2, _ = press(m2, "t")
-	os.Remove(filepath.Join(dir, "0-ccc.jsonl"))
-	m2, cmd2 := pressType(m2, tea.KeyEnter)
-	nm2, _ := m2.Update(cmd2())
-	m2 = nm2.(Model)
-	if m2.trash == nil || !m2.trash.isErr || !strings.Contains(m2.trash.msg, "missing") {
-		t.Fatalf("a vanished file should be reported: %+v", m2.trash)
-	}
-}
-
-// Enter is the only restore key in the trash popup; u is not bound.
-func TestTrashPopupUIsNotARestoreKey(t *testing.T) {
-	agents.Home = t.TempDir()
-	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
-	putTrash(t, "claude", "aaa", "Fine", time.Now(), map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
-	m := New(Options{}, "")
-	m.height, m.width = 30, 120
-	m, _ = press(m, "t")
-	m, cmd := press(m, "u")
-	if cmd != nil || m.restoring || m.trash == nil || m.trash.msg != "" {
-		t.Fatalf("u did something in the popup: cmd=%v restoring=%v trash=%+v", cmd != nil, m.restoring, m.trash)
-	}
-	if strings.Contains(ansi.Strip(m.View()), "enter/u") {
-		t.Fatal("the bottom bar still mentions u")
-	}
-	if _, cmd := pressType(m, tea.KeyEnter); cmd == nil {
-		t.Fatal("enter should still restore")
-	}
-}
-
-// The popup's bottom bar spells out what enter does, and falls back to a shorter
-// line when the window is too narrow for it.
-func TestTrashBottomBarWording(t *testing.T) {
-	agents.Home = t.TempDir()
-	proj := filepath.Join(agents.Home, ".claude", "projects", "-p")
-	putTrash(t, "claude", "aaa", "Fine", time.Now(), map[string]string{"0-aaa.jsonl": filepath.Join(proj, "aaa.jsonl")})
-	last := func(m Model) string {
-		lines := strings.Split(ansi.Strip(m.View()), "\n")
-		return strings.TrimSpace(lines[len(lines)-1])
-	}
-	wide := New(Options{}, "")
-	wide.height, wide.width = 30, 120
-	wide, _ = press(wide, "t")
-	if got := last(wide); !strings.Contains(got, "enter restore the selected session") || !strings.Contains(got, "h hide non-restorable") || !strings.Contains(got, "esc close") {
-		t.Fatalf("wide bar: %q", got)
-	}
-	wide, _ = press(wide, "h")
-	if got := last(wide); !strings.Contains(got, "enter restore the selected session") || !strings.Contains(got, "h show all") {
-		t.Fatalf("wide bar after h: %q", got)
-	}
-	narrow := New(Options{}, "")
-	narrow.height, narrow.width = 30, 60
-	narrow, _ = press(narrow, "t")
-	got := last(narrow)
-	if strings.Contains(got, "the selected session") || !strings.Contains(got, "enter restore") || !strings.Contains(got, "esc close") || ansi.StringWidth(got) > 60 {
-		t.Fatalf("narrow bar: %q (%d cells)", got, ansi.StringWidth(got))
-	}
-}
-
-// The "(unnamed)" placeholder is not a name to edit: the rename box starts empty.
 func TestRenameUnnamedStartsEmpty(t *testing.T) {
 	m := New(Options{}, "")
 	m.height = 20
