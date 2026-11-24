@@ -7,7 +7,7 @@
 
 ![muxlair listing Claude Code and Codex sessions grouped by folder, with a details pane](docs/screenshot.png)
 
-A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists your Claude Code, Codex and OpenCode sessions grouped by the folder they ran in. From there you can jump to a running session, reopen an old one or rename it, using the keyboard or the mouse, inside [tmux](https://github.com/tmux/tmux) or [cmux](https://cmux.com). It works in Rex too.
+A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists your Claude Code, Codex, OpenCode and pi sessions grouped by the folder they ran in. From there you can jump to a running session, reopen an old one or rename it, using the keyboard or the mouse, inside [tmux](https://github.com/tmux/tmux) or [cmux](https://cmux.com). It works in Rex too.
 
 ### Why "muxlair"?
 
@@ -32,6 +32,7 @@ Together, a home base for all your AI coding-agent sessions.
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Supported |
 | [Codex CLI](https://github.com/openai/codex) | Supported |
 | [OpenCode](https://opencode.ai) v2 | Supported (list, reopen, rename, details, peek; jump only to a session opened with `opencode -s <id>`) |
+| [pi](https://github.com/earendil-works/pi) | Supported (list, reopen, rename while closed, details, peek; a running pi marks its folder's sessions `in use?`) |
 
 ## Features
 
@@ -44,7 +45,7 @@ Together, a home base for all your AI coding-agent sessions.
   | `idle` | Open and waiting for you. |
   | `exited` | Closed. It can be reopened. |
   | `dead` | The agent can no longer reopen it (its session file is gone). Codex only. |
-  | `in use?` | An agent process `muxlair` can't identify may be using it, so `muxlair` won't open it. Codex only. |
+  | `in use?` | An agent process `muxlair` can't identify may be using it, so `muxlair` won't open or rename it. Codex and pi. |
 
 - **Jump or reopen.** 
   - `Enter` on an open session takes you to its `tmux` window, `cmux` pane or Rex tab. In Rex, showing the tab, and the new tab after reopening, needs Remote Control turned on in the Rex app's Settings, under Rex Server; without it, the tab is selected but the app keeps showing `muxlair`.
@@ -60,7 +61,7 @@ Together, a home base for all your AI coding-agent sessions.
 - [Go](https://go.dev/dl/) 1.27.1 or newer, to build `muxlair`.
 - `tmux`, `cmux` or Rex. `muxlair` runs inside one of them and opens sessions there.
 - For copying details text: a clipboard command (`pbcopy`, `wl-copy`, `xclip` or `xsel`), or a terminal that supports clipboard access (OSC 52). Inside `tmux`, the latter needs `set -g set-clipboard on`.
-- The agents you use, installed and on your `PATH` (`claude`, `codex`, `opencode`). Sessions of every supported agent can be reopened and renamed.
+- The agents you use, installed and on your `PATH` (`claude`, `codex`, `opencode`, `pi`). Sessions of every supported agent can be reopened and renamed.
 
 ## Install
 
@@ -177,17 +178,18 @@ With the details pane open, the selected session shows a **Latest exchange** blo
 - **Claude:** the last prompt you typed and the last text the agent wrote after it. A reply that was interrupted, or that stopped at a tool call, is marked "the reply stopped early"; a session that is still busy shows "working…". Subagent conversations, slash commands and Claude's own context messages are skipped.
 - **Codex:** the same, from the session file (the final answer; its progress notes only until the final answer arrives). Codex 0.166 is the version checked. A session whose file is gone (`dead`) shows nothing.
 - **OpenCode:** the last prompt and the last text the agent wrote after it, from OpenCode's database; reasoning and tool output are left out. OpenCode 2.3 is the version checked.
+- **pi:** the last prompt and the last text the agent wrote after it, from the session file; thinking and tool calls are left out. pi 1.6 is the version checked.
 - **Not shown** when there is no room in the pane, or when the session has no prompt yet.
 - **Privacy.** The text appears on your screen, so anyone who can see it can read your conversation. Set `conversation_peek` to `false` (or turn it off in Settings, `s`) and `muxlair` reads no conversation text at all.
 
 ## What `muxlair` reads and changes
 
-`muxlair` makes no network connections of its own. It reads local files and runs local commands: `tmux`, `cmux`, `rex`, `lsof`, `ps`, `codex` to rename Codex sessions, and `opencode api` to rename OpenCode sessions. Reopening a session starts the agent itself (`claude`, `codex` or `opencode`) in a new terminal; the agents are separate programs and do whatever they normally do.
+`muxlair` makes no network connections of its own. It reads local files and runs local commands: `tmux`, `cmux`, `rex`, `lsof`, `ps`, `codex` to rename Codex sessions, `opencode api` to rename OpenCode sessions, and `pi --mode rpc` to rename pi sessions. Reopening a session starts the agent itself (`claude`, `codex`, `opencode` or `pi`) in a new terminal; the agents are separate programs and do whatever they normally do.
 
-`muxlair` reads each agent's own session files: `~/.claude` for Claude Code, `~/.codex` (or `$CODEX_HOME`) for Codex, and OpenCode's database, `~/.local/share/opencode/opencode.db` (or under `$XDG_DATA_HOME`), opened read-only. It changes them in only one case:
+`muxlair` reads each agent's own session files: `~/.claude` for Claude Code, `~/.codex` (or `$CODEX_HOME`) for Codex, and OpenCode's database, `~/.local/share/opencode/opencode.db` (or under `$XDG_DATA_HOME`), opened read-only, and `~/.pi/agent/sessions` (or `$PI_CODING_AGENT_DIR`, `$PI_CODING_AGENT_SESSION_DIR`) for pi. It changes them in only one case:
 
 - **Rename:**
-  - **A closed session:** a Claude session gets the same rename record `/rename` would write. A Codex session is renamed through Codex's own app server. An OpenCode session, closed or running, is renamed through OpenCode's own server (`opencode api session.update`), so nothing is typed into its terminal.
+  - **A closed session:** a Claude session gets the same rename record `/rename` would write. A Codex session is renamed through Codex's own app server. An OpenCode session, closed or running, is renamed through OpenCode's own server (`opencode api session.update`), so nothing is typed into its terminal. A closed pi session is renamed by pi itself (`pi --mode rpc --offline` with `set_session_name`, which appends the record `/name` writes; no model is called).
   - **A running session:** `muxlair` types `/rename <name>` into its terminal (a `tmux` pane, a `cmux` tab or workspace, or a Rex tab). It does this only when the session is idle and its input box is empty, so nothing you're typing gets sent. In `tmux` and Rex, and for Codex in `cmux`, `muxlair` reads the screen to check; for Claude in `cmux`, `cmux` itself guards the input box.
   - **If it can't type:** the terminal isn't a `tmux` pane, `cmux` tab or workspace, or Rex tab it can reach, the session is busy, or you have a draft in the input box.
     - A Codex session is still renamed through the app server. `muxlair` tells you the open session keeps its old name until you run `/rename` there or reopen it.
@@ -208,7 +210,8 @@ With the details pane open, the selected session shows a **Latest exchange** blo
 - **Agent file formats can change.** `muxlair` reads Claude Code's, Codex's and OpenCode's own files (transcripts, session records, their databases). These are not stable, documented interfaces, so an agent update can break session discovery, names or the details pane until `muxlair` catches up.
 - **Platforms.** `muxlair` is developed and tested on macOS only. It has not been tested on Linux, and may not work there yet. Known issue: if Codex runs with its shared app-server daemon, a running Codex session can't be matched to its terminal, so jump and rename-in-place don't work for it. Windows is not supported.
 - **OpenCode: jump only with `-s`.** `muxlair` knows which session an OpenCode terminal shows only when it was started as `opencode -s <id>`, as `muxlair` itself does. One started as plain `opencode` isn't matched, so `Enter` opens another view of the session instead of jumping; OpenCode's server keeps both in sync.
-- **Only Claude Code, Codex and OpenCode.** Other agents are not supported yet.
+- **pi: no jump, and a running pi blocks its folder.** pi replaces its process arguments with `pi` and keeps no lock file, so `muxlair` can't tell which session a running pi has open. Every pi session in that folder shows `in use?` and can't be opened or renamed from `muxlair` until that pi exits; rename it there with `/name`.
+- **Only Claude Code, Codex, OpenCode and pi.** Other agents are not supported yet.
 - **Rex tabs get no agent color.** Rex has no tab colors to set, so `color_tabs` only applies in `tmux` and `cmux`.
 
 ## License

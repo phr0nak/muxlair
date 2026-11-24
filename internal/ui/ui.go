@@ -26,6 +26,7 @@ var (
 		"claude":   "#D97757", // Anthropic orange
 		"codex":    "#3B82F6", // blue
 		"opencode": "#8B5CF6", // purple
+		"pi":       "#FFE135", // banana yellow
 	}
 	statusColor = map[agents.Status]lipgloss.Color{
 		agents.Busy:   "#22C55E",
