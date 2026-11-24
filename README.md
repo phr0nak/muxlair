@@ -7,7 +7,7 @@
 
 ![muxlair listing Claude Code and Codex sessions grouped by folder, with a details pane](docs/screenshot.png)
 
-A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists your Claude Code, Codex and OpenCode sessions grouped by the folder they ran in. From there you can jump to a running session, reopen an old one or rename it, using the keyboard or the mouse, inside [tmux](https://github.com/tmux/tmux) or [cmux](https://cmux.com). In Rex, it can open closed sessions in new tabs.
+A terminal dashboard for your local AI coding-agent sessions. `muxlair` lists your Claude Code, Codex and OpenCode sessions grouped by the folder they ran in. From there you can jump to a running session, reopen an old one or rename it, using the keyboard or the mouse, inside [tmux](https://github.com/tmux/tmux) or [cmux](https://cmux.com). It works in Rex too.
 
 ### Why "muxlair"?
 
@@ -47,9 +47,9 @@ Together, a home base for all your AI coding-agent sessions.
   | `in use?` | An agent process `muxlair` can't identify may be using it, so `muxlair` won't open it. Codex only. |
 
 - **Jump or reopen.** 
-  - `Enter` on an open session takes you to its `tmux` window or `cmux` pane.
-  - `Enter` on a closed one reopens it where `muxlair` runs: a new `tmux` window, a new `cmux` workspace, or a new Rex tab. In Rex, `muxlair` can't jump to a session that is already open yet.
-- **Rename** with `r`. The new name is applied in the agent too. Renaming inside the agent, with `/rename`, updates `muxlair` right away, along with the title of its `tmux` window or `cmux` tab, and its `cmux` workspace when the session is the only terminal in it.
+  - `Enter` on an open session takes you to its `tmux` window, `cmux` pane or Rex tab. A Rex tab in another Rex session also needs the Rex app to accept remote control, so it can be switched to that session.
+  - `Enter` on a closed one reopens it where `muxlair` runs: a new `tmux` window, a new `cmux` workspace, or a new Rex tab.
+- **Rename** with `r`. The new name is applied in the agent too. Renaming inside the agent, with `/rename`, updates `muxlair` right away, along with the title of its `tmux` window, `cmux` tab or Rex tab, and its `cmux` workspace when the session is the only terminal in it.
 - **Details pane** with the session's ID, folder, file location, start time, last activity, model, token usage and cost, when the agent records them.
 - **Conversation peek.** The details pane also shows the latest exchange of the conversation (your last prompt and the agent's answer), and `p` opens it in full. It is read from the session's own file, never summarized, and tool calls and reasoning are left out. See [Conversation peek](#conversation-peek).
 - **Mouse support.** Scroll, click, double-click to open, drag the divider to resize the details pane, and drag across text in the details pane to copy it, for example a session ID or a path.
@@ -58,7 +58,7 @@ Together, a home base for all your AI coding-agent sessions.
 ## Requirements
 
 - [Go](https://go.dev/dl/) 1.27.1 or newer, to build `muxlair`.
-- `tmux`, `cmux` or Rex. `muxlair` runs inside one of them and opens sessions there. In Rex it only opens closed sessions in new tabs (see [Known limitations](#known-limitations)).
+- `tmux`, `cmux` or Rex. `muxlair` runs inside one of them and opens sessions there.
 - For copying details text: a clipboard command (`pbcopy`, `wl-copy`, `xclip` or `xsel`), or a terminal that supports clipboard access (OSC 52). Inside `tmux`, the latter needs `set -g set-clipboard on`.
 - The agents you use, installed and on your `PATH` (`claude`, `codex`, `opencode`). Sessions of every supported agent can be reopened and renamed.
 
@@ -188,8 +188,8 @@ With the details pane open, the selected session shows a **Latest exchange** blo
 
 - **Rename:**
   - **A closed session:** a Claude session gets the same rename record `/rename` would write. A Codex session is renamed through Codex's own app server. An OpenCode session, closed or running, is renamed through OpenCode's own server (`opencode api session.update`), so nothing is typed into its terminal.
-  - **A running session:** `muxlair` types `/rename <name>` into its terminal (a `tmux` pane, or a `cmux` tab or workspace). It does this only when the session is idle and its input box is empty, so nothing you're typing gets sent. In `tmux`, and for Codex in `cmux`, `muxlair` reads the screen to check; for Claude in `cmux`, `cmux` itself guards the input box.
-  - **If it can't type:** the terminal isn't a `tmux` pane or `cmux` tab or workspace it can reach, the session is busy, or you have a draft in the input box.
+  - **A running session:** `muxlair` types `/rename <name>` into its terminal (a `tmux` pane, a `cmux` tab or workspace, or a Rex tab). It does this only when the session is idle and its input box is empty, so nothing you're typing gets sent. In `tmux` and Rex, and for Codex in `cmux`, `muxlair` reads the screen to check; for Claude in `cmux`, `cmux` itself guards the input box.
+  - **If it can't type:** the terminal isn't a `tmux` pane, `cmux` tab or workspace, or Rex tab it can reach, the session is busy, or you have a draft in the input box.
     - A Codex session is still renamed through the app server. `muxlair` tells you the open session keeps its old name until you run `/rename` there or reopen it.
     - A Claude session is not renamed. Run `/rename` there yourself.
   - **A new Claude session:** its empty input box shows a dimmed example prompt. `muxlair` treats a prompt that is entirely dimmed text as empty, so a new session can be renamed before its first message. Until it has a title or a prompt, it shows as `(unnamed)` in the list, not the name Claude makes up from the folder. A new Codex session only appears in the list after its first message, because Codex creates it then. Anything typed there is normal text, so a draft still blocks the rename.
@@ -209,7 +209,7 @@ With the details pane open, the selected session shows a **Latest exchange** blo
 - **Platforms.** `muxlair` is developed and tested on macOS only. It has not been tested on Linux, and may not work there yet. Known issue: if Codex runs with its shared app-server daemon, a running Codex session can't be matched to its terminal, so jump and rename-in-place don't work for it. Windows is not supported.
 - **OpenCode: jump only with `-s`.** `muxlair` knows which session an OpenCode terminal shows only when it was started as `opencode -s <id>`, as `muxlair` itself does. One started as plain `opencode` isn't matched, so `Enter` opens another view of the session instead of jumping; OpenCode's server keeps both in sync.
 - **Only Claude Code, Codex and OpenCode.** Other agents are not supported yet.
-- **Rex support is partial.** Inside Rex, `muxlair` opens closed sessions in a new tab of the Rex session it runs in. It can't jump to a session that is already open in a Rex tab or type `/rename` into it, and Rex tabs get no agent color.
+- **Rex tabs get no agent color.** Rex has no tab colors to set, so `color_tabs` only applies in `tmux` and `cmux`.
 
 ## License
 
