@@ -51,17 +51,7 @@ type loadedMsg struct {
 type tickMsg struct{}
 type fsMsg struct{}
 type statusMsg string
-type deletedMsg string
 type renamedMsg struct{ key, name, err, note string }
-type restoredMsg struct {
-	name, err string
-	notes     []string
-}
-type autoDeletedMsg struct {
-	deleted []string // "<agent> <session id>"
-	failed  []string // keys; not retried this run
-	err     string   // last error
-}
 type detailsMsg struct {
 	key     string
 	updated time.Time
@@ -117,51 +107,9 @@ type settingsForm struct {
 }
 
 const (
-	itemSave   = 5
-	itemCancel = 6
+	itemSave   = 4
+	itemCancel = 5
 )
-
-// trashRow is a trash entry with what the popup shows about it, read once when
-// the list is built. Reading the disk on every key or redraw would let rows shift
-// under the cursor; the restore itself re-checks the files when it runs.
-type trashRow struct {
-	agents.TrashEntry
-	state string // the RESTORABLE column: "yes", "no" or "done" (see TrashEntry.State)
-}
-
-// ok: enter can restore it.
-func (r trashRow) ok() bool { return r.state == "yes" }
-
-func newTrashRows(es []agents.TrashEntry) []trashRow {
-	rows := make([]trashRow, len(es))
-	for i, e := range es {
-		rows[i] = trashRow{e, e.State()}
-	}
-	return rows
-}
-
-// trashView is the "t" popup: the trash, with a way to restore from it.
-type trashView struct {
-	rows  []trashRow
-	cur   int    // index into visible()
-	hide  bool   // "h": leave out the rows that can't be restored
-	msg   string // result of the last restore
-	isErr bool
-}
-
-// visible is what the popup lists: every row, or only the ones with state "yes".
-func (t *trashView) visible() []trashRow {
-	if !t.hide {
-		return t.rows
-	}
-	var out []trashRow
-	for _, r := range t.rows {
-		if r.ok() {
-			out = append(out, r)
-		}
-	}
-	return out
-}
 
 // keyHelp is the "?" popup: every key and what it does.
 var keyHelp = [][2]string{
@@ -172,31 +120,24 @@ var keyHelp = [][2]string{
 	{"← →  h l", "collapse / expand a folder"},
 	{"space  tab", "toggle a folder"},
 	{"r", "rename (in the agent too)"},
-	{"d", "delete (to ~/.muxlair/trash)"},
 	{"/", "filter; esc clears it"},
 	{"i", "show / hide details"},
 	{"< >", "resize details; dragging works too"},
 	{"mouse drag", "select details text; copied on release"},
 	{"R", "refresh"},
 	{"p", "peek at the latest exchange of the conversation (drag to copy, esc closes)"},
-	{"t", "trash: restore a deleted session (h there hides the ones that can't be)"},
 	{"s", "settings"},
 	{"?", "this help"},
 	{"q  ctrl+c", "quit"},
 }
 
-var settingItems = []string{"Mouse support", "Tint opened tabs", "Details pane at start", "Conversation peek", "Auto-delete headless"}
-
-// autoDeleteSteps are the choices offered for auto_delete_headless.
-var autoDeleteSteps = []time.Duration{0, time.Minute, 5 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour, 24 * time.Hour}
+var settingItems = []string{"Mouse support", "Tint opened tabs", "Details pane at start", "Conversation peek"}
 
 type Model struct {
 	cfgPath     string
 	cfgEvents   chan struct{}
 	settings    *settingsForm
-	trash       *trashView // trash popup open
 	peek        *peekView  // conversation popup open
-	restoring   bool       // a restore is running (it outlives the popup, so only one at a time)
 	help        bool       // keys popup open
 	sel         *selection // text selected in the details pane
 	selecting   bool       // mouse button held while selecting
@@ -214,16 +155,12 @@ type Model struct {
 	cur         int
 	filter      string
 	filtering   bool
-	confirm     *agents.Session
 	editing     *agents.Session // session being renamed
 	editBuf     string
 	agentRename map[string]bool // sessions with an agent rename in flight
 	showDetails bool
 	detailsW    int                    // user-chosen details width, 0 = default
 	dragging    bool                   // dragging the list/details divider
-	autoDel     map[string]bool        // headless sessions auto-delete failed on
-	autoBusy    bool                   // an auto-delete batch is running
-	autoKeys    map[string]bool        // sessions in the running batch; open refuses them
 	details     map[string]detailEntry // per session key; reloaded when the session's Updated changes
 	detailsBusy map[string]bool
 	status      string
@@ -249,7 +186,6 @@ func New(opts Options, cfgPath string) Model {
 		cfgPath: cfgPath, cfgEvents: make(chan struct{}, 1),
 		opts: opts, labels: map[string]string{}, agentRename: map[string]bool{},
 		showDetails: opts.Details, details: map[string]detailEntry{}, detailsBusy: map[string]bool{},
-		autoDel: map[string]bool{}, autoKeys: map[string]bool{},
 		names: map[string]string{}, rename: map[string]bool{}, renaming: map[string]bool{}, pending: map[string]time.Time{}, collapsed: map[string]bool{},
 		events: make(chan struct{}, 1), loading: true, // Init starts the first load
 	}
@@ -440,46 +376,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.peek == m.opts.Peek {
 			m.details[msg.key] = detailEntry{time.Now(), msg.updated, msg.d, msg.err}
 		}
-	case autoDeletedMsg:
-		m.autoBusy = false
-		clear(m.autoKeys)
-		for _, k := range msg.failed {
-			m.autoDel[k] = true // failing sessions aren't retried on every refresh
-		}
-		switch {
-		case msg.err != "":
-			m.status = "auto-delete " + msg.err
-		case len(msg.deleted) == 1:
-			m.status = "auto-deleted " + msg.deleted[0] + " (in ~/.muxlair/trash)"
-		case len(msg.deleted) > 1:
-			m.status = fmt.Sprintf("auto-deleted %d headless sessions (in ~/.muxlair/trash)", len(msg.deleted))
-		}
-		if len(msg.deleted) > 0 {
-			return m, m.reload()
-		}
-		return m, nil
-	case restoredMsg:
-		result := "restored " + msg.name
-		if msg.err != "" {
-			result = "restore failed: " + msg.err
-		}
-		for _, n := range msg.notes {
-			result += " · note: " + n
-		}
-		m.restoring = false
-		if t := m.trash; t != nil {
-			t.msg, t.isErr = result, msg.err != ""
-			if es, _ := agents.ListTrash(); msg.err == "" {
-				t.rows = newTrashRows(es) // a restored Claude entry leaves the trash; a Codex one is marked
-				t.cur = max(0, min(t.cur, len(t.visible())-1))
-				if len(es) == 0 {
-					m.trash, m.status = nil, result
-				}
-			}
-		} else {
-			m.status = result
-		}
-		return m, m.reload() // the restored session shows up in the list
 	case renamedMsg:
 		delete(m.agentRename, msg.key)
 		if msg.err != "" {
@@ -490,9 +386,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.note != "" {
 			m.status += "; " + msg.note
 		}
-		return m, m.reload()
-	case deletedMsg:
-		m.status = "moved to " + string(msg)
 		return m, m.reload()
 	case loadedMsg:
 		m.loading = false
@@ -513,8 +406,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sel != nil && m.paneText() != m.selPane {
 			m.sel, m.selecting = nil, false // the pane changed under the selection
 		}
-		auto := m.autoDelete()
-		return m, tea.Batch(cmd, again, auto)
+		return m, tea.Batch(cmd, again)
 	case tea.KeyMsg:
 		return m.key(msg)
 	case tea.MouseMsg:
@@ -526,9 +418,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // mouse: wheel moves the cursor, click selects, click on a header toggles it,
 // a second click on the same session within 400ms opens it.
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.trash != nil {
-		return m, nil // modal: keys only
-	}
 	if m.peek != nil {
 		return m.peekMouse(msg)
 	}
@@ -551,7 +440,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	inPane := dw > 0 && paneX >= 0 && paneX < dw && paneY >= 0 && paneY < m.avail()+3
 	switch {
 	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && inPane && !m.tooSmall() &&
-		m.confirm == nil && m.editing == nil && !m.filtering: // popups are modal
+		m.editing == nil && !m.filtering: // popups are modal
 		m.sel, m.selecting = &selection{paneX, paneY, paneX, paneY}, true
 		m.selPane = m.paneText()
 		return m, nil
@@ -595,7 +484,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.dragging = true // pressed on the divider
 		return m, nil
 	}
-	if msg.Action != tea.MouseActionPress || m.tooSmall() || m.confirm != nil || m.filtering || m.editing != nil {
+	if msg.Action != tea.MouseActionPress || m.tooSmall() || m.filtering || m.editing != nil {
 		return m, nil
 	}
 	switch msg.Button {
@@ -645,7 +534,7 @@ func (m Model) settingsClick(x, y int) (tea.Model, tea.Cmd) {
 	switch {
 	case line >= 0 && line < len(settingItems):
 		m.settings.cur = line
-		m.settings.change(+1)
+		m.settings.change()
 	case line == len(settingItems)+1:
 		if x < px+ansi.StringWidth(pop[0])/2 {
 			m.settings.cur = itemSave
@@ -768,9 +657,9 @@ func (m Model) settingsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j", "tab":
 		f.cur = (f.cur + 1) % (itemCancel + 1)
 	case "left", "h":
-		f.change(-1)
+		f.change()
 	case "right", "l", " ":
-		f.change(+1)
+		f.change()
 	case "ctrl+s":
 		return m.saveSettings()
 	case "enter":
@@ -780,204 +669,25 @@ func (m Model) settingsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case itemCancel:
 			m.settings = nil
 		default:
-			f.change(+1)
+			f.change()
 		}
 	}
 	return m, nil
 }
 
-// trashKey handles keys while the trash popup is open.
-func (m Model) trashKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
-	t := m.trash
-	vis := t.visible()
-	t.cur = max(0, min(t.cur, len(vis)-1))
-	switch k.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc", "q", "t":
-		m.trash = nil
-	case "up", "k":
-		t.cur = max(0, t.cur-1)
-	case "down", "j":
-		t.cur = max(0, min(len(vis)-1, t.cur+1))
-	case "h":
-		// Keep the selected entry selected when it is still listed.
-		var sel string
-		if t.cur < len(vis) {
-			sel = vis[t.cur].Dir
-		}
-		t.hide, t.msg, t.isErr = !t.hide, "", false
-		vis = t.visible()
-		t.cur = max(0, min(t.cur, len(vis)-1))
-		for i, e := range vis {
-			if e.Dir == sel {
-				t.cur = i
-			}
-		}
-	case "enter":
-		if len(vis) == 0 {
-			return m, nil
-		}
-		r := vis[t.cur]
-		switch {
-		case m.restoring:
-			t.msg, t.isErr = "a restore is still running…", false
-		case r.state == "done":
-			t.msg, t.isErr = "already restored (its backup stays in the trash)", true
-		case r.state == "no":
-			t.msg, t.isErr = "can't be restored: its session file is missing, only readable history was saved", true
-		default:
-			m.restoring, t.msg, t.isErr = true, "restoring…", false
-			return m, restoreCmd(r.TrashEntry)
-		}
-	}
-	return m, nil
-}
+// The conversation popup never grows past this.
+const wideMaxWidth = 130
 
-// restoreCmd restores exactly e (not the newest entry for its session). Codex goes through its app
-// server, so it can take a few seconds.
-func restoreCmd(e agents.TrashEntry) tea.Cmd {
-	return func() tea.Msg {
-		notes, err := agents.RestoreEntry(e)
-		msg := restoredMsg{name: e.Meta.Name, notes: notes}
-		if err != nil {
-			msg.err = err.Error()
-		}
-		return msg
-	}
-}
-
-// Trash popup columns: the same ones `muxlair trash` prints. Each column has a
-// fixed width and its text is centered in it, so values sit centered under
-// their headers.
-type trashLayout struct{ agent, id, deleted, restorable, restored, gap int }
-
-var (
-	trashRoomy   = trashLayout{agent: 8, id: 10, deleted: 13, restorable: 12, restored: 13, gap: 2}
-	trashCompact = trashLayout{agent: 6, id: 8, deleted: 11, restorable: 10, restored: 11, gap: 1} // narrow windows
-)
-
-// The popup never grows past this; the name fills what the other columns leave.
-const trashMaxWidth = 130
-
-// wideWidth is the popup width: as wide as the window allows, up to trashMaxWidth.
+// wideWidth is the popup width: as wide as the window allows, up to wideMaxWidth.
 func (m Model) wideWidth() int {
 	if m.width <= 0 {
-		return trashMaxWidth
+		return wideMaxWidth
 	}
-	return max(16, min(trashMaxWidth, m.width-6))
+	return max(16, min(wideMaxWidth, m.width-6))
 }
 
-// center pads s on both sides to w cells (the extra cell of an odd gap goes right).
-func center(s string, w int) string {
-	n := ansi.StringWidth(s)
-	if n >= w {
-		return s
-	}
-	left := (w - n) / 2
-	return strings.Repeat(" ", left) + s + strings.Repeat(" ", w-n-left)
-}
-
-// leftAlign pads s on the right to w cells.
-func leftAlign(s string, w int) string {
-	if n := ansi.StringWidth(s); n < w {
-		return s + strings.Repeat(" ", w-n)
-	}
-	return s
-}
-
-// trashPopup draws the trash list: a header, then one entry per line with the
-// current one marked, then the result of the last restore. When the window is
-// narrow it uses tighter columns, and drops RESTORED and then DELETED, but
-// never the name's last 10 cells.
-func (m Model) trashPopup() []string {
-	t, w := m.trash, m.wideWidth()
-	in := w - 4
-	room := max(1, m.boxHeight()-6) // borders, header, blank and message lines
-	top := max(0, t.cur-room+1)
-	c := trashRoomy
-	if base := 2 + c.agent + c.id + c.restorable + 3*c.gap; in < base+10 {
-		c = trashCompact
-	}
-	used := 2 + c.agent + c.gap + c.id + c.gap + c.restorable + c.gap // gutter and the columns always shown
-	showDeleted := in >= used+c.deleted+c.gap+10
-	showRestored := showDeleted && in >= used+c.deleted+c.gap+c.restored+c.gap+10
-	if showDeleted {
-		used += c.deleted + c.gap
-	}
-	if showRestored {
-		used += c.restored + c.gap
-	}
-	nameCol := max(4, in-used)
-	nameW := nameCol
-	if nameCol >= 20 {
-		nameW -= 4 // a margin before the border, like the gutter on the left
-	}
-	gap := strings.Repeat(" ", c.gap)
-	row := func(agent, id, deleted, restorable, restored, name string) string {
-		cells := []string{center(agent, c.agent), center(id, c.id)}
-		if showDeleted {
-			cells = append(cells, center(deleted, c.deleted))
-		}
-		cells = append(cells, center(restorable, c.restorable))
-		if showRestored {
-			cells = append(cells, center(restored, c.restored))
-		}
-		return strings.Join(cells, gap) + gap + leftAlign(name, nameCol) // NAME is left-aligned: names differ in length
-	}
-	head := colHead.Render("  " + row("AGENT", "ID", "DELETED", "RESTORABLE", "RESTORED", "NAME"))
-	body := []string{padTo(head, in, lipgloss.NewStyle())}
-	vis := t.visible()
-	if len(vis) == 0 {
-		body = append(body, dim.Render(center("(nothing here can be restored)", in)))
-	}
-	for i := top; i < len(vis) && i < top+room; i++ {
-		e := vis[i]
-		restored := "-"
-		if e.Restored() {
-			restored = e.Meta.RestoredAt.Local().Format("01-02 15:04")
-		}
-		id := e.Meta.ID
-		if len(id) > 8 {
-			id = id[:8]
-		}
-		name := e.ShortName(nameW)
-		line := row(e.Meta.Agent, id, e.Meta.DeletedAt.Local().Format("01-02 15:04"), e.state, restored, name)
-		switch {
-		case i == t.cur:
-			sel := lipgloss.NewStyle().Background(selBg)
-			line = sel.Render(padTo("› "+line, in, sel))
-		case !e.ok():
-			line = dim.Render(padTo("  "+line, in, lipgloss.NewStyle()))
-		default:
-			line = padTo("  "+line, in, lipgloss.NewStyle())
-		}
-		body = append(body, line)
-	}
-	// Entries enter can't restore: no session file, or already restored.
-	cant := 0
-	for _, r := range t.rows {
-		if !r.ok() {
-			cant++
-		}
-	}
-	msg := ""
-	switch {
-	case t.msg == "" && cant > 0 && t.hide:
-		msg = ansi.Truncate(dim.Render(fmt.Sprintf("%d that can't be restored are hidden · press ", cant))+cursor.Render("h")+dim.Render(" to show them"), in, "…")
-	case t.msg == "" && cant > 0:
-		msg = ansi.Truncate(dim.Render(fmt.Sprintf("%d can't be restored · press ", cant))+cursor.Render("h")+dim.Render(" to hide them"), in, "…")
-	case t.msg == "":
-	case t.isErr:
-		msg = errSty.Render(ansi.Truncate(t.msg, in, "…"))
-	default:
-		msg = dim.Render(ansi.Truncate(t.msg, in, "…"))
-	}
-	return box("Trash", w, append(body, "", msg))
-}
-
-// change flips a toggle or steps the auto-delete choice by dir.
-func (f *settingsForm) change(dir int) {
+// change flips the selected toggle.
+func (f *settingsForm) change() {
 	switch f.cur {
 	case 0:
 		f.opts.Mouse = !f.opts.Mouse
@@ -987,29 +697,7 @@ func (f *settingsForm) change(dir int) {
 		f.opts.Details = !f.opts.Details
 	case 3:
 		f.opts.Peek = !f.opts.Peek
-	case 4:
-		steps := autoDeleteChoices(f.opts.AutoDelete)
-		for i, d := range steps {
-			if d == f.opts.AutoDelete {
-				f.opts.AutoDelete = steps[(i+dir+len(steps))%len(steps)]
-				return
-			}
-		}
 	}
-}
-
-// autoDeleteChoices is autoDeleteSteps plus the current value if it is custom
-// (set by hand in the file), so opening and saving settings never loses it.
-func autoDeleteChoices(cur time.Duration) []time.Duration {
-	steps := append([]time.Duration(nil), autoDeleteSteps...)
-	for _, d := range steps {
-		if d == cur {
-			return steps
-		}
-	}
-	steps = append(steps, cur)
-	sort.Slice(steps, func(i, j int) bool { return steps[i] < steps[j] })
-	return steps
 }
 
 func (m Model) saveSettings() (tea.Model, tea.Cmd) {
@@ -1038,34 +726,11 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.trash != nil {
-		return m.trashKey(k)
-	}
 	if m.peek != nil {
 		return m.peekKey(k)
 	}
 	if m.settings != nil {
 		return m.settingsKey(k)
-	}
-	if m.confirm != nil {
-		s := *m.confirm
-		m.confirm = nil
-		if k.String() != "y" {
-			m.status = "delete cancelled"
-			return m, nil
-		}
-		return m, func() tea.Msg {
-			// Re-read state: the session may have been resumed since the snapshot.
-			s, err := fresh(s)
-			if err != nil {
-				return statusMsg("delete: " + err.Error())
-			}
-			dir, err := agents.Trash(s)
-			if err != nil {
-				return statusMsg("delete: " + err.Error())
-			}
-			return deletedMsg(dir)
-		}
 	}
 	if m.editing != nil {
 		switch k.Type {
@@ -1169,22 +834,6 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.peek = &peekView{key: r.s.Key()}
 			return m, m.loadDetails(true)
 		}
-	case "t":
-		es, err := agents.ListTrash()
-		switch {
-		case len(es) == 0 && err != nil:
-			m.status = "trash: " + err.Error()
-		case len(es) == 0:
-			m.status = "the trash is empty"
-		default:
-			m.trash = &trashView{rows: newTrashRows(es)}
-			switch {
-			case m.restoring:
-				m.trash.msg = "a restore is still running…"
-			case err != nil:
-				m.trash.msg, m.trash.isErr = "some entries can't be read: "+err.Error(), true
-			}
-		}
 	case "?":
 		m.help = true
 	case "R":
@@ -1208,11 +857,6 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.open(false)
 	case "w":
 		return m, m.open(true)
-	case "d":
-		if r, ok := m.row(); ok && r.s != nil {
-			s := *r.s
-			m.confirm = &s
-		}
 	}
 	return m, nil
 }
@@ -1240,10 +884,6 @@ func (m *Model) open(workspace bool) tea.Cmd {
 		return nil
 	}
 	k := r.s.Key()
-	if m.autoKeys[k] {
-		m.status = r.s.Name + " is being auto-deleted (to ~/.muxlair/trash); try again in a moment"
-		return nil
-	}
 	if t, ok := m.pending[k]; ok && time.Since(t) < 15*time.Second {
 		m.status = "already opening " + r.s.Name
 		return nil
@@ -1268,7 +908,7 @@ func (m *Model) open(workspace bool) tea.Cmd {
 		}
 		switch {
 		case s.Dead:
-			return openFailedMsg{k, "codex can't resume this session: its rollout file is gone (d deletes it)"}
+			return openFailedMsg{k, "codex can't resume this session: its rollout file is gone (codex delete <id> removes it)"}
 		case s.PID != 0:
 			// Running, but not in a terminal we can reach; a second resume would fork the session.
 			where := "without a terminal"
@@ -1283,84 +923,10 @@ func (m *Model) open(workspace bool) tea.Cmd {
 		case s.MaybeLive:
 			return openFailedMsg{k, "an unidentified " + s.Agent + " process in this folder may already run this session"}
 		}
-		if s.Headless {
-			// Resumed by the user from now on: never auto-delete it.
-			if err := agents.ClaimForResume(s); err != nil {
-				return openFailedMsg{k, err.Error()}
-			}
-		}
 		if err := mux.Open(tabName(s.Name), s.Cwd, s.Resume, color, workspace); err != nil {
 			return openFailedMsg{k, err.Error()}
 		}
 		return statusMsg("opened " + s.Name)
-	}
-}
-
-// autoDelete trashes headless sessions that have exited and been idle longer
-// than opts.AutoDelete. Interactive sessions are never touched. One batch runs
-// at a time: a single re-read of all sessions, then up to 20 deletes in a row.
-func (m *Model) autoDelete() tea.Cmd {
-	if m.opts.AutoDelete <= 0 || m.autoBusy {
-		return nil
-	}
-	idle := m.opts.AutoDelete
-	eligible := func(s agents.Session) bool {
-		return s.Headless && s.PID == 0 && !s.MaybeLive && time.Since(s.Updated) >= idle
-	}
-	var keys []string
-	for _, s := range m.sessions {
-		_, opening := m.pending[s.Key()]
-		if eligible(s) && !m.autoDel[s.Key()] && !opening && len(keys) < 20 {
-			keys = append(keys, s.Key())
-		}
-	}
-	if len(keys) == 0 {
-		return nil
-	}
-	m.autoBusy = true
-	clear(m.autoKeys)
-	for _, k := range keys {
-		m.autoKeys[k] = true // open() refuses these until the batch ends
-	}
-	return func() tea.Msg {
-		ss, err := agents.List() // re-read once: anything restarted or touched since is skipped
-		if err != nil {
-			return autoDeletedMsg{err: err.Error()}
-		}
-		byKey := map[string]agents.Session{}
-		for _, s := range ss {
-			byKey[s.Key()] = s
-		}
-		var res autoDeletedMsg
-		for _, k := range keys {
-			s, ok := byKey[k]
-			if !ok || !eligible(s) {
-				continue
-			}
-			// Re-check right before deleting, under the lock a resume from any
-			// muxlair takes, so nothing can resume it between check and delete.
-			deleted := false
-			err := agents.WithSessionLock(func() error {
-				s, err := agents.Recheck(s)
-				if err != nil || !eligible(s) {
-					return nil // gone, resumed or touched: skip silently
-				}
-				if _, err := agents.Trash(s); err != nil {
-					return err
-				}
-				deleted = true
-				return nil
-			})
-			if err != nil {
-				res.failed = append(res.failed, k)
-				res.err = s.Agent + " " + s.ID + ": " + err.Error()
-				continue
-			}
-			if deleted {
-				res.deleted = append(res.deleted, s.Agent+" "+s.ID)
-			}
-		}
-		return res
 	}
 }
 
@@ -1548,7 +1114,7 @@ func (m Model) indexOfGroup(g string) int {
 
 // Layout: a rounded box titled "muxlair" holding a column header, a rule and the
 // rows, optionally split with a details pane on the right; the help line sits
-// below it on the terminal's last row. Rename/delete prompts are popups on top.
+// below it on the terminal's last row. Rename and other prompts are popups on top.
 const chromeRows = 6 // top border, blank, column header, rule, bottom border, help line
 const firstRowY = 4  // screen row of the first list row
 
@@ -1631,23 +1197,10 @@ func (m Model) View() string {
 	// Repeat the popup's actions here: in a short terminal the popup can be clipped.
 	case m.help:
 		foot = dim.Render("↑↓ scroll · any other key closes")
-	case m.trash != nil:
-		h := "h hide non-restorable"
-		if m.trash.hide {
-			h = "h show all"
-		}
-		// The full wording when it fits; the short one in a narrow window, so no key is cut off.
-		foot = "↑↓ move · enter restore the selected session · " + h + " · esc close"
-		if m.width > 0 && ansi.StringWidth(foot) > m.width {
-			foot = "↑↓ move · enter restore · " + h + " · esc close"
-		}
-		foot = dim.Render(foot)
 	case m.peek != nil:
 		foot = dim.Render("↑↓ scroll · drag to copy · esc close")
 	case m.settings != nil:
 		foot = dim.Render("↑↓ move · space/←→ change · enter on Save · ctrl+s save · esc cancel")
-	case m.confirm != nil:
-		foot = dim.Render("y delete · n / esc cancel")
 	case m.editing != nil:
 		foot = dim.Render("enter save · esc cancel")
 	case m.filtering:
@@ -1660,7 +1213,7 @@ func (m Model) View() string {
 		foot = m.status
 	default:
 		// Resize, fold and mouse keys are left to the ? popup, to keep this line short.
-		foot = "enter open/focus · w cmux workspace · r rename · R refresh · i details · / filter · d delete · s settings · q quit"
+		foot = "enter open/focus · w cmux workspace · r rename · R refresh · i details · / filter · s settings · q quit"
 		if m.filter != "" {
 			foot = "filter: " + m.filter + " · " + foot
 		}
@@ -1685,13 +1238,11 @@ func (m Model) fit(s string) string {
 	return ansi.Truncate(s, m.width, "…")
 }
 
-// popup returns the rename or delete dialog, or nil.
+// popup returns the open dialog, or nil.
 func (m Model) popup() []string {
 	w := m.popupWidth()
 	in := w - 4
 	switch {
-	case m.trash != nil:
-		return m.trashPopup()
 	case m.peek != nil:
 		return m.peekPopup()
 	case m.help:
@@ -1713,7 +1264,7 @@ func (m Model) popup() []string {
 			}
 			return "[ ] off"
 		}
-		values := []string{onOff(f.opts.Mouse), onOff(f.opts.ColorTabs), onOff(f.opts.Details), onOff(f.opts.Peek), "‹ " + config.FormatDuration(f.opts.AutoDelete) + " ›"}
+		values := []string{onOff(f.opts.Mouse), onOff(f.opts.ColorTabs), onOff(f.opts.Details), onOff(f.opts.Peek)}
 		var body []string
 		for i, name := range settingItems {
 			l := fmt.Sprintf("%-24s %s", name, values[i])
@@ -1737,15 +1288,6 @@ func (m Model) popup() []string {
 		}
 		body = append(body, "", dim.Render("saved to "+tildify(m.cfgPath)))
 		return box("Settings", w, body)
-	case m.confirm != nil:
-		s := m.confirm
-		return box("Delete session", w, []string{
-			"Move " + agentLabel(s.Agent) + " session",
-			lipgloss.NewStyle().Bold(true).Render(ansi.Truncate(s.Name, in, "…")),
-			"to ~/.muxlair/trash?",
-			"",
-			dim.Render("y delete · n / esc cancel"),
-		})
 	case m.editing != nil:
 		// The field scrolls by terminal cells so the cursor, always at the end, stays visible.
 		text := m.editBuf
@@ -2092,7 +1634,7 @@ func (m Model) renderRow(i, w int) string {
 		case s.Dead:
 			dot = "✕" // agent can't resume it any more
 		case s.MaybeLive:
-			dot, dotColor = "○", statusColor[agents.Idle] // open/delete blocked
+			dot, dotColor = "○", statusColor[agents.Idle] // open blocked
 		}
 		parts = append(parts,
 			st(plain).Render("  "),
