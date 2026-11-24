@@ -1,10 +1,9 @@
-// Package agents discovers local agent sessions (Claude, Codex, Antigravity).
+// Package agents discovers local agent sessions (Claude, Codex).
 package agents
 
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -30,7 +29,7 @@ func (s Status) String() string {
 }
 
 type Session struct {
-	Agent   string // "claude", "codex", "agy"
+	Agent   string // Agent.Name(): "claude", "codex"
 	ID      string
 	Name    string
 	Cwd     string
@@ -60,8 +59,8 @@ var Home, _ = os.UserHomeDir()
 func List() ([]Session, error) {
 	var all []Session
 	var errs []error
-	for _, f := range []func() ([]Session, error){listClaude, listCodex, listAgy} {
-		ss, err := f()
+	for _, a := range registry {
+		ss, err := a.List()
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -71,15 +70,13 @@ func List() ([]Session, error) {
 	return all, errors.Join(errs...)
 }
 
-// WatchPaths are the files/dirs whose changes should trigger a refresh.
+// WatchPaths are the files/dirs whose changes should trigger a refresh, for every agent.
 func WatchPaths() []string {
-	paths := []string{
-		filepath.Join(Home, ".claude", "sessions"),
-		CodexHome(),
-		filepath.Join(Home, ".claude", "projects"), // new project dirs get watched as they appear
+	var paths []string
+	for _, a := range registry {
+		paths = append(paths, a.WatchPaths()...)
 	}
-	dirs, _ := filepath.Glob(filepath.Join(Home, ".claude", "projects", "*"))
-	return append(paths, dirs...)
+	return paths
 }
 
 func alive(pid int) bool {

@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,7 +25,6 @@ var (
 	agentColor = map[string]lipgloss.Color{
 		"claude": "#D97757", // Anthropic orange
 		"codex":  "#3B82F6", // blue
-		"agy":    "#8B5CF6", // Antigravity purple
 	}
 	statusColor = map[agents.Status]lipgloss.Color{
 		agents.Busy:   "#22C55E",
@@ -930,9 +930,9 @@ func (m *Model) open(workspace bool) tea.Cmd {
 	}
 }
 
-// renameCmd renames s in the agent itself, so the agent and muxlair agree:
-// codex through its app server, an exited Claude through its transcript, and a
-// live Claude by typing /rename into its terminal (only while idle).
+// renameCmd renames s in the agent itself, so the agent and muxlair agree. A
+// closed session is renamed through the agent's own interface; a running one by
+// typing the agent's rename command into its terminal (see renameRunning).
 func renameCmd(s agents.Session, name string) tea.Cmd {
 	k := s.Key()
 	return func() tea.Msg {
@@ -941,23 +941,14 @@ func renameCmd(s agents.Session, name string) tea.Cmd {
 			return renamedMsg{key: k, name: name, err: err.Error()}
 		}
 		note := ""
+		a, ok := agents.ByName(s.Agent)
 		switch {
-		case s.Agent == "codex":
-			note, err = renameCodex(s, name)
-		case s.Agent == "claude" && s.PID == 0:
-			err = agents.RenameClaudeTranscript(s, name)
-		case s.Agent == "claude":
-			t, ok := mux.Targets()[s.TTY]
-			switch {
-			case !ok || s.TTY == "":
-				err = fmt.Errorf("can't reach its terminal; run /rename %s there", name)
-			case s.Status == agents.Busy:
-				err = fmt.Errorf("claude is busy; rename it once it is idle")
-			default:
-				err = mux.SendLine(t, "claude", "/rename "+name)
-			}
-		default:
+		case !ok:
 			err = fmt.Errorf("renaming %s sessions is not supported", s.Agent)
+		case s.PID == 0:
+			err = a.Rename(s, name)
+		default:
+			note, err = renameRunning(a, s, name)
 		}
 		if err != nil {
 			return renamedMsg{key: k, name: name, err: err.Error()}
@@ -966,29 +957,35 @@ func renameCmd(s agents.Session, name string) tea.Cmd {
 	}
 }
 
-// renameCodex renames a Codex session. A running one keeps its name in memory
-// and only learns a new one in its own terminal, so type /rename there when
-// that is safe (the session then saves the name itself). Otherwise the name is
-// set through the app server, and the open session shows it after a reopen.
-func renameCodex(s agents.Session, name string) (note string, err error) {
-	if s.PID != 0 {
-		var why string
-		t, ok := mux.Targets()[s.TTY]
-		switch {
-		case !ok || s.TTY == "":
-			why = "its terminal isn't a tmux pane or cmux tab muxlair can reach"
-		case s.Status == agents.Busy:
-			why = "it is busy"
-		default:
-			if err := mux.SendLine(t, "codex", "/rename "+name); err == nil {
-				return "", nil
-			} else {
-				why = err.Error()
-			}
+// renameRunning renames a running session by typing the agent's rename command
+// into its terminal, only while it is idle with an empty prompt. A running agent
+// keeps its name in memory, so this is how it learns the new one. When typing
+// isn't possible, an agent that can be renamed while running (Codex, through its
+// app server) is renamed anyway, with a note that the open session shows the new
+// name only after the command or a reopen; any other agent is left as it was.
+func renameRunning(a agents.Agent, s agents.Session, name string) (note string, err error) {
+	line := a.RenameLine(name)
+	var why, cant string // why: for the note; cant: the error when it can't be renamed now
+	t, ok := mux.Targets()[s.TTY]
+	switch {
+	case !ok || s.TTY == "":
+		why = "its terminal isn't a tmux pane or cmux tab muxlair can reach"
+		cant = "can't reach its terminal; run " + line + " there"
+	case s.Status == agents.Busy:
+		why = "it is busy"
+		cant = s.Agent + " is busy; rename it once it is idle"
+	default:
+		err := mux.SendLine(t, s.Agent, line)
+		if err == nil {
+			return "", nil
 		}
-		note = "the open Codex keeps the old name until you run /rename there or reopen it: " + why
+		why, cant = err.Error(), err.Error()
 	}
-	return note, agents.RenameCodex(s.ID, name)
+	if !a.RenameRunning() {
+		return "", errors.New(cant)
+	}
+	note = "the open " + a.Title() + " keeps the old name until you run " + strings.Fields(line)[0] + " there or reopen it: " + why
+	return note, a.Rename(s, name)
 }
 
 // tabName shortens a session name for a tmux window or cmux tab title.
