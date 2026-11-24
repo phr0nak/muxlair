@@ -13,12 +13,12 @@ import (
 	"unicode/utf8"
 )
 
-// Target is a terminal (tmux pane or cmux surface) hosting a session.
+// Target is a terminal (tmux pane, cmux surface or Rex block) hosting a session.
 type Target struct {
-	Mux       string // "tmux" or "cmux"
-	Pane      string // tmux pane id (%3) or cmux surface ref
-	Window    string // tmux window id or cmux window ref
-	Workspace string // cmux workspace ref; tmux session name
+	Mux       string // "tmux", "cmux" or "rex"
+	Pane      string // tmux pane id (%3), cmux surface ref or Rex block id
+	Window    string // tmux window id, cmux window ref or Rex window (tab) id
+	Workspace string // cmux workspace ref; tmux session name; Rex session id
 	CmuxPane  string // cmux pane ref
 	Solo      bool   // only terminal in its tmux window / cmux workspace
 }
@@ -63,9 +63,14 @@ var ownTTY = func() (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// Targets maps tty name ("ttys023") to the terminal that owns it, across tmux and cmux.
+// Targets maps tty name ("ttys023") to the terminal that owns it, across tmux,
+// cmux and Rex. tmux comes last: a tmux client inside a Rex tab or cmux surface
+// owns its panes' ttys, not the outer terminal's.
 func Targets() map[string]Target {
 	m := map[string]Target{}
+	for tty, t := range rexTargets() {
+		m[tty] = t
+	}
 	for tty, t := range cmuxTargets() {
 		m[tty] = t
 	}
@@ -76,15 +81,21 @@ func Targets() map[string]Target {
 }
 
 func Focus(t Target) error {
-	if t.Mux == "tmux" {
+	switch t.Mux {
+	case "tmux":
 		return tmuxFocus(t)
+	case "rex":
+		return rexFocus(t)
 	}
 	return cmuxFocus(t)
 }
 
 func Rename(t Target, name string) error {
-	if t.Mux == "tmux" {
+	switch t.Mux {
+	case "tmux":
 		return tmuxRename(t, name)
+	case "rex":
+		return rexRename(t, name)
 	}
 	return cmuxRename(t, name)
 }
@@ -165,7 +176,7 @@ const enterDelay = 200 * time.Millisecond
 // SendLine types text into an agent's prompt ("claude" or "codex") and presses
 // Enter. It refuses unless the prompt is empty, so a half-written draft is never
 // submitted. cmux guards Claude's prompt itself, but not Codex's (typing over a
-// Codex draft just appends to it), and tmux guards nothing: for those muxlair
+// Codex draft just appends to it), and tmux and Rex guard nothing: for those muxlair
 // reads the screen and looks for the agent's empty prompt. Where it can read the
 // screen it also checks that the prompt is empty again afterwards, so a line the
 // agent did not take is reported.
@@ -174,8 +185,8 @@ func SendLine(t Target, agent, text string) error {
 	if agent == "codex" {
 		empty = codexPromptEmpty
 	}
-	readable := t.Mux == "tmux" || agent == "codex"
-	styled := t.Mux == "tmux" && agent == "claude" // to tell its dim placeholder from a draft
+	readable := t.Mux != "cmux" || agent == "codex"
+	styled := t.Mux != "cmux" && agent == "claude" // to tell its dim placeholder from a draft
 	if readable {
 		screen, err := screenOf(t, styled)
 		if err != nil {
@@ -186,7 +197,9 @@ func SendLine(t Target, agent, text string) error {
 		}
 	}
 	var err error
-	if t.Mux == "tmux" {
+	if t.Mux == "rex" {
+		err = rexSend(t, text)
+	} else if t.Mux == "tmux" {
 		if err = run("tmux", "send-keys", "-t", t.Pane, "-l", text); err == nil {
 			time.Sleep(enterDelay)
 			err = run("tmux", "send-keys", "-t", t.Pane, "Enter")
@@ -213,6 +226,9 @@ func SendLine(t Target, agent, text string) error {
 // screenOf returns the visible text of the terminal; styled keeps tmux's SGR
 // escapes (cmux's read-screen is plain text only).
 func screenOf(t Target, styled bool) (string, error) {
+	if t.Mux == "rex" {
+		return rexScreen(t, styled)
+	}
 	if t.Mux == "tmux" {
 		args := []string{"capture-pane", "-p", "-t", t.Pane}
 		if styled {

@@ -170,3 +170,35 @@ func TestCurrentPrefersRexOverCmux(t *testing.T) {
 		t.Fatalf("nested tmux: got %q", got)
 	}
 }
+
+func TestRexTargetMap(t *testing.T) {
+	blocks, err := parseRexBlocks(`[{"session":"s1","window":"w1","block":"b1","pid":10},
+		{"session":"s1","window":"w2","block":"b2","pid":20},{"session":"s1","window":"w2","block":"b3","pid":30},
+		{"session":"s2","window":"w3","block":"b4","pid":40},{"session":"s1","window":"w1","block":"b5","pid":0}]`)
+	if err != nil || len(blocks) != 5 {
+		t.Fatalf("%v %+v", err, blocks)
+	}
+	m := rexTargetMap(blocks, "   10 ttys001\n   20 ttys002\n   30 ??\n   40 ttys004\n")
+	// b5 has no running program, but it shares w1 with b1.
+	if got := m["ttys001"]; got != (Target{Mux: "rex", Pane: "b1", Window: "w1", Workspace: "s1"}) {
+		t.Fatalf("ttys001: %+v", got)
+	}
+	if m["ttys002"].Solo || !m["ttys004"].Solo || len(m) != 3 {
+		t.Fatalf("a shared tab is not solo; no tty or no ps line means no target: %+v", m)
+	}
+	if bs, err := parseRexBlocks("{}\n"); err != nil || bs != nil {
+		t.Fatalf("empty result: %v %v", bs, err)
+	}
+}
+
+func TestRexVTKeepsOnlySGR(t *testing.T) {
+	in := "\x1b]0;title\x07\x1b[1G\x1b[2m❯\x1b[3CTry it\x1b[K\x1b[0m"
+	if got := rexVT(in); got != "\x1b[2m❯   Try it\x1b[0m" {
+		t.Fatalf("got %q", got)
+	}
+	// The result feeds the same prompt check as tmux -e: a dim example prompt is empty.
+	screen := "──────\n" + rexVT("\x1b[39m❯\x1b[1C\x1b[2mTry \"fix the bug\"\x1b[0m") + "\n──────"
+	if !promptEmpty(screen) {
+		t.Fatalf("dim placeholder not seen as empty: %q", screen)
+	}
+}
