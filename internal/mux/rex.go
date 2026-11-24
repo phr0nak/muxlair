@@ -102,21 +102,24 @@ func rexTargetMap(blocks []rexBlock, ps string) map[string]Target {
 	return m
 }
 
-// rexFocus focuses the block, which also makes its tab the active one. When the
-// block is in another Rex session, a Rex app attached to muxlair's session (from
-// outside Rex: any Rex app) switches to that session.
-// shortcut: Rex doesn't say which app is in front, so with several apps attached
-// to muxlair's session the first one that accepts switches; upgrade if Rex
-// exposes the app in front.
+// rexFocus focuses the block, then has the Rex app show its tab: the app keeps
+// its own selected tab, so focusing on the server alone changes nothing on
+// screen.
 func rexFocus(t Target) error {
 	if err := run("rex", "--autostart=false", "focus", "-s", t.Workspace, t.Pane); err != nil {
 		return err
 	}
-	// muxlair's own Rex session, also when it runs in tmux inside a Rex tab.
-	own := os.Getenv("REX_SESSION")
-	if t.Workspace == own {
-		return nil
-	}
+	return rexShow(t.Workspace, t.Window)
+}
+
+// rexShow switches a Rex app to the tab (window) in session: an app attached to
+// muxlair's own Rex session, or from outside Rex any Rex app. The app only does
+// this with Remote Control turned on in its settings.
+// shortcut: Rex doesn't say which app is in front, so with several apps attached
+// to muxlair's session the first one that accepts switches; upgrade if Rex
+// exposes the app in front.
+func rexShow(session, window string) error {
+	own := os.Getenv("REX_SESSION") // also set when muxlair runs in tmux inside a Rex tab
 	out, err := output("rex", "--autostart=false", "client", "ls", "--json")
 	if err != nil {
 		return err
@@ -139,16 +142,20 @@ func rexFocus(t Target) error {
 			continue
 		}
 		// One app failing (closing, another machine) must not stop the others.
-		err := run("rex", "--autostart=false", "-C", c.ID, "do", "session.select", "session_id="+t.Workspace)
+		err := run("rex", "--autostart=false", "-C", c.ID, "do", "session.select", "session_id="+session, "window_id="+window)
 		if err == nil {
 			return nil
 		}
 		errs = append(errs, err)
 	}
-	// The tab is focused in its Rex session either way; only showing that session failed.
-	msg := "its tab is in another Rex session, and no Rex app could be switched to it"
-	if len(errs) > 0 {
-		msg += " (the Rex app may refuse remote control; allow it in Rex's settings, or switch sessions in Rex yourself): " + errors.Join(errs...).Error()
+	msg := "the Rex app didn't switch to its tab"
+	switch {
+	case len(errs) == 0:
+		msg += ": no Rex app is attached"
+	case strings.Contains(errors.Join(errs...).Error(), "Remote Control"):
+		msg += ": turn on Remote Control in Rex's Settings, under Rex Server"
+	default:
+		msg += ": " + errors.Join(errs...).Error()
 	}
 	return errors.New(msg)
 }
@@ -219,11 +226,30 @@ func rexVT(s string) string {
 }
 
 // rexOpen starts cmd in cwd in a new tab (a Rex "window") of the Rex session
-// muxlair runs in. The new tab takes focus, like a new tmux window.
+// muxlair runs in, and has the Rex app show it, like a new tmux window.
 func rexOpen(name, cwd, cmd string) error {
-	return run("rex", "window", "new", "-s", os.Getenv("REX_SESSION"), rexLabel(name),
-		"-c", cwd, "--", "sh", "-c", cmd)
+	session := os.Getenv("REX_SESSION")
+	out, err := output("rex", "window", "new", "-s", session, rexLabel(name), "-c", cwd, "--json", "--", "sh", "-c", cmd)
+	if err != nil {
+		return err
+	}
+	var w struct {
+		WindowID string `json:"window_id"`
+	}
+	if json.Unmarshal([]byte(out), &w) != nil || w.WindowID == "" {
+		return nil // opened; there is just no tab to show
+	}
+	if err := rexShow(session, w.WindowID); err != nil {
+		return NotShown{err.Error()}
+	}
+	return nil
 }
+
+// NotShown is Open's error when the session was opened but its new tab isn't
+// on screen: the open itself succeeded, so callers must not retry it.
+type NotShown struct{ Why string }
+
+func (e NotShown) Error() string { return "opened in a new tab, but " + e.Why }
 
 // rexLabel makes name safe as rex's positional tab label: a leading dash would
 // be read as a flag.

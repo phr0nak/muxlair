@@ -47,7 +47,7 @@ Together, a home base for all your AI coding-agent sessions.
   | `in use?` | An agent process `muxlair` can't identify may be using it, so `muxlair` won't open it. Codex only. |
 
 - **Jump or reopen.** 
-  - `Enter` on an open session takes you to its `tmux` window, `cmux` pane or Rex tab. A Rex tab in another Rex session also needs the Rex app to accept remote control, so it can be switched to that session.
+  - `Enter` on an open session takes you to its `tmux` window, `cmux` pane or Rex tab. In Rex, showing the tab, and the new tab after reopening, needs Remote Control turned on in the Rex app's Settings, under Rex Server; without it, the tab is selected but the app keeps showing `muxlair`.
   - `Enter` on a closed one reopens it where `muxlair` runs: a new `tmux` window, a new `cmux` workspace, or a new Rex tab.
 - **Rename** with `r`. The new name is applied in the agent too. Renaming inside the agent, with `/rename`, updates `muxlair` right away, along with the title of its `tmux` window, `cmux` tab or Rex tab, and its `cmux` workspace when the session is the only terminal in it.
 - **Details pane** with the session's ID, folder, file location, start time, last activity, model, token usage and cost, when the agent records them.

@@ -922,6 +922,11 @@ func (m *Model) open() tea.Cmd {
 			return openFailedMsg{k, "an unidentified " + s.Agent + " process in this folder may already run this session"}
 		}
 		if err := mux.Open(tabName(s.Name), s.Cwd, s.Resume, color); err != nil {
+			var ns mux.NotShown
+			if errors.As(err, &ns) {
+				// Opened: keep the pending guard, so a second Enter can't open it twice.
+				return statusMsg("opened " + s.Name + " in a new Rex tab, but " + ns.Why)
+			}
 			return openFailedMsg{k, err.Error()}
 		}
 		return statusMsg("opened " + s.Name)
