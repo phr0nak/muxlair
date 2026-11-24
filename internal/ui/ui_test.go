@@ -1036,3 +1036,17 @@ func TestRenameRunningUnreachable(t *testing.T) {
 		t.Fatalf("unknown tty: err %v renamed %q", err, got)
 	}
 }
+
+func TestRelevantWatchEvents(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/h/.local/share/opencode/opencode.db":     true,
+		"/h/.local/share/opencode/opencode.db-wal": true,
+		"/h/.codex/state_5.sqlite-wal":             true,
+		"/h/.claude/sessions/12.json":              true,
+		"/h/.local/share/opencode/notes.txt":       false,
+	} {
+		if got := relevant(path); got != want {
+			t.Errorf("%s: got %v", path, got)
+		}
+	}
+}

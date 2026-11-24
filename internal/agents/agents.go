@@ -1,4 +1,4 @@
-// Package agents discovers local agent sessions (Claude, Codex).
+// Package agents discovers local agent sessions (Claude, Codex, OpenCode).
 package agents
 
 import (
@@ -29,7 +29,7 @@ func (s Status) String() string {
 }
 
 type Session struct {
-	Agent   string // Agent.Name(): "claude", "codex"
+	Agent   string // Agent.Name(): "claude", "codex", "opencode"
 	ID      string
 	Name    string
 	Cwd     string

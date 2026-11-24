@@ -23,8 +23,9 @@ import (
 
 var (
 	agentColor = map[string]lipgloss.Color{
-		"claude": "#D97757", // Anthropic orange
-		"codex":  "#3B82F6", // blue
+		"claude":   "#D97757", // Anthropic orange
+		"codex":    "#3B82F6", // blue
+		"opencode": "#8B5CF6", // purple
 	}
 	statusColor = map[agents.Status]lipgloss.Color{
 		agents.Busy:   "#22C55E",
@@ -274,7 +275,7 @@ func watch(ch, cfg chan struct{}, cfgPath string) {
 func relevant(path string) bool {
 	base := filepath.Base(path)
 	switch {
-	case strings.HasPrefix(base, "state_5.sqlite"), base == "session_index.jsonl":
+	case strings.HasPrefix(base, "state_5.sqlite"), base == "session_index.jsonl", strings.HasPrefix(base, "opencode.db"):
 		return true
 	case strings.HasPrefix(path, agents.CodexHome()+"/"):
 		return false
@@ -945,7 +946,7 @@ func renameCmd(s agents.Session, name string) tea.Cmd {
 		switch {
 		case !ok:
 			err = fmt.Errorf("renaming %s sessions is not supported", s.Agent)
-		case s.PID == 0:
+		case s.PID == 0 || a.RenameLine(name) == "":
 			err = a.Rename(s, name)
 		default:
 			note, err = renameRunning(a, s, name)
@@ -1161,7 +1162,7 @@ func (m Model) View() string {
 	}
 	lines = append(lines, top+border.Render("╮"))
 	lines = append(lines, side+strings.Repeat(" ", lw)+side+right(0)) // space under the titles
-	head := fmt.Sprintf("    %-*s %5s  %-6s  %s", statusCol, "STATUS", "LAST", "AGENT", "SESSION")
+	head := fmt.Sprintf("    %-*s %5s  %-*s  %s", statusCol, "STATUS", "LAST", agentCol, "AGENT", "SESSION")
 	lines = append(lines, side+padTo(colHead.Render(head), lw, lipgloss.NewStyle())+side+right(1))
 	rule := border.Render("├") + hline(lw)
 	if dw > 0 {
@@ -1639,12 +1640,15 @@ func (m Model) renderRow(i, w int) string {
 			st(plain.Foreground(dotColor)).Render(fmt.Sprintf(" %-*s", statusCol-2, statusWord(*s))),
 			st(plain).Render(fmt.Sprintf(" %5s  ", ago(s.Updated))),
 			// Not bold: bold orange "claude" read as bigger than "codex".
-			st(plain.Foreground(agentColor[s.Agent])).Render(fmt.Sprintf("%-6s", s.Agent)),
+			st(plain.Foreground(agentColor[s.Agent])).Render(fmt.Sprintf("%-*s", agentCol, s.Agent)),
 			st(plain).Render("  "+s.Name),
 		)
 	}
 	return padTo(strings.Join(parts, ""), w, st(plain))
 }
+
+// agentCol fits the longest agent name, "opencode".
+const agentCol = 8
 
 // padTo truncates or pads s to exactly w cells, padding with style pad.
 func padTo(s string, w int, pad lipgloss.Style) string {
