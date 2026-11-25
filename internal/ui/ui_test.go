@@ -1122,3 +1122,23 @@ func TestStatusExpires(t *testing.T) {
 		t.Fatalf("a repeated message kept the old timer: %q", m.status)
 	}
 }
+
+// The BRANCH column sits between AGENT and SESSION when the list is wide enough.
+func TestBranchColumn(t *testing.T) {
+	m := New(Options{}, "")
+	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Name: "fix it", Cwd: "/a", Updated: time.Now(),
+		Branch: "feat/a-rather-long-branch-name", Git: agents.GitInfo{Repo: true, Worktree: true}}}
+	m.rebuild()
+	m.height, m.width = 20, 140
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "AGENT     BRANCH") || !strings.Contains(v, "↳ feat/a-rather…") {
+		t.Fatalf("wide:\n%s", v)
+	}
+	if i, j := strings.Index(v, "↳ feat"), strings.Index(v, "fix it"); i < 0 || j < i {
+		t.Fatalf("branch must come before the session name:\n%s", v)
+	}
+	m.width = 60
+	if v := ansi.Strip(m.View()); strings.Contains(v, "BRANCH") || strings.Contains(v, "↳") {
+		t.Fatalf("narrow: the column should be hidden:\n%s", v)
+	}
+}

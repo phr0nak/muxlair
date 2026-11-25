@@ -44,6 +44,10 @@ type Session struct {
 	MaybeLive bool
 	// Dead: the agent can no longer resume it (codex thread whose rollout file is gone).
 	Dead bool
+	// Branch is the git branch the agent recorded for the session ("" if it records none).
+	Branch string
+	// Git is the session folder's git state now.
+	Git GitInfo
 
 	historyDB bool // codex: turns live in thread_history sqlite (paginated mode)
 }
@@ -57,17 +61,48 @@ var Home, _ = os.UserHomeDir()
 // List returns every session from every agent, newest first. One agent failing
 // does not hide the others: their sessions are returned along with the error.
 func List() ([]Session, error) {
+	return ListOf(registry...)
+}
+
+// ListOf returns the sessions of the given agents only, newest first, with
+// their folders' git state.
+func ListOf(as ...Agent) ([]Session, error) {
 	var all []Session
 	var errs []error
-	for _, a := range registry {
+	for _, a := range as {
 		ss, err := a.List()
 		if err != nil {
 			errs = append(errs, err)
 		}
 		all = append(all, ss...)
 	}
+	for i := range all {
+		all[i].Git = FolderGit(all[i].Cwd)
+	}
 	sort.Slice(all, func(i, j int) bool { return all[i].Updated.After(all[j].Updated) })
 	return all, errors.Join(errs...)
+}
+
+// BranchLabel is the short form for lists: the shown branch, "↳ " first when
+// the folder is a linked git worktree, "—" when there is none.
+func (s Session) BranchLabel() string {
+	b, _ := s.ShownBranch()
+	switch {
+	case b == "":
+		return "—"
+	case s.Git.Worktree:
+		return "↳ " + b
+	}
+	return b
+}
+
+// ShownBranch is the branch to show for s: the one the agent recorded, else
+// the folder's current one (current is then true).
+func (s Session) ShownBranch() (branch string, current bool) {
+	if s.Branch != "" {
+		return s.Branch, false
+	}
+	return s.Git.Branch, true
 }
 
 // WatchPaths are the files/dirs whose changes should trigger a refresh, for every agent.

@@ -43,10 +43,10 @@ func TestListClaude(t *testing.T) {
 	proj := filepath.Join(Home, ".claude", "projects", "-p")
 	os.MkdirAll(proj, 0o700)
 	jsonl := filepath.Join(proj, "abc.jsonl")
-	os.WriteFile(jsonl, []byte(`{"type":"user","cwd":"/p"}`+"\n"), 0o600)
+	os.WriteFile(jsonl, []byte(`{"type":"user","cwd":"/p","gitBranch":"main"}`+"\n"+`{"type":"assistant","gitBranch":"feat/x"}`+"\n"), 0o600)
 
 	ss, err := listClaude()
-	if err != nil || len(ss) != 1 || ss[0].Cwd != "/p" || len(ss[0].Files) != 1 || ss[0].Files[0] != jsonl {
+	if err != nil || len(ss) != 1 || ss[0].Cwd != "/p" || len(ss[0].Files) != 1 || ss[0].Files[0] != jsonl || ss[0].Branch != "feat/x" {
 		t.Fatalf("list: %v %+v", err, ss)
 	}
 }

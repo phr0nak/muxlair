@@ -59,7 +59,8 @@ Not every feature works the same for every agent. See [Agent support](#agent-sup
   | `rex` | Jumps to its tab | Opens it in a new tab |
 
 - **Rename** with `r`. The name changes in the agent too, and in the session's terminal title (its `tmux` window, `cmux` tab or `rex` tab, when it doesn't share it with other terminals). A rename made inside the agent shows up in `muxlair` right away. Some agents limit this; see [Agent support](#agent-support).
-- **Details pane** with the session's ID, folder, file, start time, last activity, model, tokens and cost, as far as the agent records them.
+- **Git branch** in the `BRANCH` column and the details pane: the branch the session ran on, as the agent recorded it, else the folder's branch now. `↳` marks a session that ran in a linked [git worktree](https://git-scm.com/docs/git-worktree), and the details pane shows its main checkout. The column hides when the list is narrow.
+- **Details pane** with the session's ID, branch, folder, file, start time, last activity, model, tokens and cost, as far as the agent records them.
 - **Conversation peek**: your last prompt and the agent's answer, in the details pane and in full with `p`. See [Conversation peek](#conversation-peek).
 - **Mouse**: scroll, click, double-click to open, drag the divider to resize the details pane, and drag across details text to copy it.
 - **Settings** in the app (`s`) or in `~/.muxlair/config.json`, applied immediately.
@@ -136,6 +137,7 @@ Anything else exits with status 2 and an error message.
 | `ID` | The agent's session ID. |
 | `UPDATED` | Last activity, `YYYY-MM-DD HH:MM`. |
 | `AGENT` | `claude`, `codex`, `opencode`, `pi` or `agy`. |
+| `BRANCH` | The session's git branch (`↳` for a linked worktree, `—` outside git). |
 | `TTY` | The session's terminal, empty when it isn't running. |
 | `MAYBELIVE` | `true` when the session shows `in use?`. |
 | `CWD` | The folder the session ran in. |
@@ -223,11 +225,13 @@ An answer that stopped early (interrupted, or at a tool call) is marked as such,
 | Model and tokens | ✓ | ◐ ⁴ | ✓ | ✓ | ✓ |
 | Cost | ✓ | ✗ | ✓ | ✓ | ✗ |
 | Conversation peek | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Git branch of the session | ✓ | ✓ | ◐ ⁵ | ◐ ⁵ | ◐ ⁵ |
 
 1. A running `pi` doesn't say which session it has open, so every `pi` session in its folder shows `in use?` until it exits.
 2. Jumping and `idle` need an `opencode` session started as `opencode -s <id>`, as `muxlair` starts it; `busy` comes from `opencode`'s database. A plain `opencode` isn't matched, so `Enter` opens a second view, which `opencode` keeps in sync.
 3. `agy` can't rename a closed conversation from outside. `r` asks you to open it first.
 4. `codex` records a token total, not the split by kind.
+5. The agent doesn't record the branch, so `muxlair` shows the folder's branch now, which can differ from the one the session ran on.
 
 ### Other limitations
 

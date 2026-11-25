@@ -36,11 +36,18 @@ func listCodex() ([]Session, error) {
 		return nil, err
 	}
 	defer db.Close()
+	// An older codex has no git_branch column; without it the branch is just unknown.
+	branch := "''"
+	var hasBranch int
+	if db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('threads') WHERE name = 'git_branch'`).Scan(&hasBranch) == nil && hasBranch > 0 {
+		branch = "COALESCE(git_branch, '')"
+	}
 	// Hide subagent threads (source is a JSON object): each is a helper of a
 	// listed thread, e.g. the reviewer spawned by `codex review`. Non-interactive
 	// `codex exec`/`codex review` runs are listed.
 	rows, err := db.Query(`SELECT id, rollout_path, cwd,
-		COALESCE(NULLIF(name,''), NULLIF(title,''), first_user_message), updated_at_ms, history_mode, source
+		COALESCE(NULLIF(name,''), NULLIF(title,''), first_user_message), updated_at_ms, history_mode, source,
+		` + branch + `
 		FROM threads WHERE archived = 0 AND source NOT LIKE '{%'`)
 	if err != nil {
 		return nil, err
@@ -53,7 +60,7 @@ func listCodex() ([]Session, error) {
 		var rollout string
 		var updated sql.NullInt64
 		var mode, source string
-		if err := rows.Scan(&s.ID, &rollout, &s.Cwd, &s.Name, &updated, &mode, &source); err != nil {
+		if err := rows.Scan(&s.ID, &rollout, &s.Cwd, &s.Name, &updated, &mode, &source, &s.Branch); err != nil {
 			return nil, err
 		}
 		s.Agent = "codex"
