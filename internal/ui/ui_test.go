@@ -1171,3 +1171,21 @@ func TestBranchColumn(t *testing.T) {
 		t.Fatalf("short branch should use 12 cells:\n%s", v)
 	}
 }
+
+// A long session name is cut with "…" a margin before the details pane, not at its border.
+func TestSessionNameMargin(t *testing.T) {
+	m := New(Options{}, "")
+	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Cwd: "/a", Updated: time.Now(),
+		Name: strings.Repeat("long session name ", 20)}}
+	m.rebuild()
+	m.height, m.width = 20, 120
+	m.cur = 1
+	lw, _ := m.split()
+	row := ansi.Strip(m.renderRow(m.cur, lw, m.branchWidth(lw)))
+	if ansi.StringWidth(row) != lw || !strings.HasSuffix(strings.TrimRight(row, " "), "…") {
+		t.Fatalf("row %q (width %d, want %d)", row, ansi.StringWidth(row), lw)
+	}
+	if gap := lw - ansi.StringWidth(strings.TrimRight(row, " ")); gap != nameMargin {
+		t.Fatalf("margin %d, want %d: %q", gap, nameMargin, row)
+	}
+}

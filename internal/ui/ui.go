@@ -1707,7 +1707,10 @@ func (m Model) renderRow(i, w, branchWidth int) string {
 			cell := ansi.Truncate(s.BranchLabel(), branchWidth, "…")
 			parts = append(parts, st(plain).Render("  "+cell+strings.Repeat(" ", branchWidth-ansi.StringWidth(cell))))
 		}
-		parts = append(parts, st(plain).Render("  "+s.Name))
+		// The name gets what is left, minus a margin before the details pane's border
+		// or the window's edge, so a cut name doesn't run into it.
+		room := w - ansi.StringWidth(strings.Join(parts, "")) - 2 - nameMargin
+		parts = append(parts, st(plain).Render("  "+ansi.Truncate(s.Name, max(1, room), "…")))
 	}
 	return padTo(strings.Join(parts, ""), w, st(plain))
 }
@@ -1746,6 +1749,9 @@ func gitLines(s agents.Session, label func(k, v string) string) []string {
 	}
 	return lines
 }
+
+// nameMargin is the space kept free after a cut session name.
+const nameMargin = 2
 
 // agentCol fits the longest agent name, "opencode".
 const agentCol = 8
