@@ -215,21 +215,20 @@ An answer that stopped early (interrupted, or at a tool call) is marked as such,
 | Feature | Claude Code | Codex | OpenCode | Pi | Antigravity |
 |---|---|---|---|---|---|
 | List sessions | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Reopen a closed session | ✓ | ◐ ¹ | ✓ | ◐ ² | ✓ |
-| Jump to an open session | ✓ | ✓ | ◐ ³ | ✗ ² | ✓ |
-| Busy / idle status | ✓ | ✓ | ◐ ³ | ✗ ² | ✓ |
-| Rename a closed session | ✓ | ✓ | ✓ | ✓ | ✗ ⁴ |
-| Rename an open session | ✓ | ✓ | ✓ | ✗ ² | ✓ |
-| Model and tokens | ✓ | ◐ ⁵ | ✓ | ✓ | ◐ ⁶ |
+| Reopen a closed session | ✓ | ✓ | ✓ | ◐ ¹ | ✓ |
+| Jump to an open session | ✓ | ✓ | ◐ ² | ✗ ¹ | ✓ |
+| Busy / idle status | ✓ | ✓ | ◐ ² | ✗ ¹ | ✓ |
+| Rename a closed session | ✓ | ✓ | ✓ | ✓ | ✗ ³ |
+| Rename an open session | ✓ | ✓ | ✓ | ✗ ¹ | ✓ |
+| Model and tokens | ✓ | ◐ ⁴ | ✓ | ✓ | ◐ ⁵ |
 | Cost | ✓ | ✗ | ✓ | ✓ | ✗ |
-| Conversation peek | ✓ | ✓ | ✓ | ✓ | ◐ ⁶ |
+| Conversation peek | ✓ | ✓ | ✓ | ✓ | ◐ ⁵ |
 
-1. Not a `dead` session: its file is gone.
-2. A running `pi` doesn't say which session it has open, so every `pi` session in its folder shows `in use?` until it exits.
-3. Jumping and `idle` need an `opencode` session started as `opencode -s <id>`, as `muxlair` starts it; `busy` comes from `opencode`'s database. A plain `opencode` isn't matched, so `Enter` opens a second view, which `opencode` keeps in sync.
-4. `agy` can't rename a closed conversation from outside. `r` asks you to open it first.
-5. `codex` records a token total, not the split by kind.
-6. Only for conversations with a log on this machine.
+1. A running `pi` doesn't say which session it has open, so every `pi` session in its folder shows `in use?` until it exits.
+2. Jumping and `idle` need an `opencode` session started as `opencode -s <id>`, as `muxlair` starts it; `busy` comes from `opencode`'s database. A plain `opencode` isn't matched, so `Enter` opens a second view, which `opencode` keeps in sync.
+3. `agy` can't rename a closed conversation from outside. `r` asks you to open it first.
+4. `codex` records a token total, not the split by kind.
+5. Only for conversations with a log on this machine.
 
 ### Other limitations
 
