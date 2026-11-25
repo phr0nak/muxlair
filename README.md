@@ -220,19 +220,19 @@ An answer that stopped early (interrupted, or at a tool call) is marked as such,
 | Busy / idle status | ✓ | ✓ | ◐ ² | ✗ ¹ | ✓ |
 | Rename a closed session | ✓ | ✓ | ✓ | ✓ | ✗ ³ |
 | Rename an open session | ✓ | ✓ | ✓ | ✗ ¹ | ✓ |
-| Model and tokens | ✓ | ◐ ⁴ | ✓ | ✓ | ◐ ⁵ |
+| Model and tokens | ✓ | ◐ ⁴ | ✓ | ✓ | ✓ |
 | Cost | ✓ | ✗ | ✓ | ✓ | ✗ |
-| Conversation peek | ✓ | ✓ | ✓ | ✓ | ◐ ⁵ |
+| Conversation peek | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 1. A running `pi` doesn't say which session it has open, so every `pi` session in its folder shows `in use?` until it exits.
 2. Jumping and `idle` need an `opencode` session started as `opencode -s <id>`, as `muxlair` starts it; `busy` comes from `opencode`'s database. A plain `opencode` isn't matched, so `Enter` opens a second view, which `opencode` keeps in sync.
 3. `agy` can't rename a closed conversation from outside. `r` asks you to open it first.
 4. `codex` records a token total, not the split by kind.
-5. Only for conversations with a log on this machine.
 
 ### Other limitations
 
 - **Platforms.** Developed and tested on macOS. Linux is partially tested only. Windows is not supported.
+- **Old `agy` conversations without a local log** show no model, tokens or latest exchange.
 - **`rex` tabs have no color**, so `color_tabs` only applies in `tmux` and `cmux`.
 - **A Codex you start yourself can look open for a minute after you close it.** Codex's shared background server keeps a closed session loaded for 60 s (its `thread_unload_delay_secs` setting). Sessions `muxlair` reopens run without that server (`codex resume --no-daemon`), so they show `exited` right away.
 
