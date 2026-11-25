@@ -1123,22 +1123,69 @@ func TestStatusExpires(t *testing.T) {
 	}
 }
 
-// The GIT column sits between AGENT and SESSION when the list is wide enough.
+// The GIT column follows the longest listed branch while leaving room for SESSION.
 func TestBranchColumn(t *testing.T) {
 	m := New(Options{}, "")
 	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Name: "fix it", Cwd: "/a", Updated: time.Now(),
-		Branch: "feat/a-rather-long-branch-name", Git: agents.GitInfo{Repo: true, Worktree: true}}}
+		Branch: "christian/sales-customers-povs", Git: agents.GitInfo{Repo: true, Worktree: true}}}
 	m.rebuild()
 	m.height, m.width = 20, 140
 	v := ansi.Strip(m.View())
-	if !strings.Contains(v, "AGENT     GIT") || !strings.Contains(v, "↳ feat/a-rather…") {
+	if !strings.Contains(v, "AGENT     GIT") || !strings.Contains(v, "↳ christian/sales-customers-povs") {
 		t.Fatalf("wide:\n%s", v)
 	}
-	if i, j := strings.Index(v, "↳ feat"), strings.Index(v, "fix it"); i < 0 || j < i {
+	if i, j := strings.Index(v, "↳ christian"), strings.Index(v, "fix it"); i < 0 || j < i {
 		t.Fatalf("branch must come before the session name:\n%s", v)
+	}
+	m.sessions[0].Branch = "christian/" + strings.Repeat("x", 40)
+	m.rebuild()
+	if m.branchWidth(138) != 32 {
+		t.Fatalf("long branch width = %d, want 32", m.branchWidth(138))
+	}
+	v = ansi.Strip(m.View())
+	if !strings.Contains(v, "↳ christian/xxxxxxxxxxxxxxxxxxx…") || strings.Contains(v, m.sessions[0].Branch) {
+		t.Fatalf("branch over 32 cells should be truncated:\n%s", v)
+	}
+	m.width = 80 // 78-cell list: 22 cells remain for GIT after SESSION's 24.
+	if got := m.branchWidth(78); got != 22 {
+		t.Fatalf("width-capped branch = %d, want 22", got)
+	}
+	if got := m.branchWidth(68); got != 12 {
+		t.Fatalf("smallest visible branch = %d, want 12", got)
+	}
+	if got := m.branchWidth(67); got != 0 {
+		t.Fatalf("branch should hide below 12 available cells, got %d", got)
 	}
 	m.width = 60
 	if v := ansi.Strip(m.View()); strings.Contains(v, "GIT ") || strings.Contains(v, "↳") {
 		t.Fatalf("narrow: the column should be hidden:\n%s", v)
+	}
+	m.sessions[0].Branch = "main"
+	m.sessions[0].Git.Worktree = false
+	m.rebuild()
+	m.width = 140
+	if got := m.branchWidth(138); got != 12 {
+		t.Fatalf("short branch width = %d, want 12", got)
+	}
+	if v := ansi.Strip(m.View()); !strings.Contains(v, "GIT           SESSION") || !strings.Contains(v, "main        ") {
+		t.Fatalf("short branch should use 12 cells:\n%s", v)
+	}
+}
+
+// A long session name is cut with "…" a margin before the details pane, not at its border.
+func TestSessionNameMargin(t *testing.T) {
+	m := New(Options{}, "")
+	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Cwd: "/a", Updated: time.Now(),
+		Name: strings.Repeat("long session name ", 20)}}
+	m.rebuild()
+	m.height, m.width = 20, 120
+	m.cur = 1
+	lw, _ := m.split()
+	row := ansi.Strip(m.renderRow(m.cur, lw, m.branchWidth(lw)))
+	if ansi.StringWidth(row) != lw || !strings.HasSuffix(strings.TrimRight(row, " "), "…") {
+		t.Fatalf("row %q (width %d, want %d)", row, ansi.StringWidth(row), lw)
+	}
+	if gap := lw - ansi.StringWidth(strings.TrimRight(row, " ")); gap != nameMargin {
+		t.Fatalf("margin %d, want %d: %q", gap, nameMargin, row)
 	}
 }

@@ -1216,8 +1216,9 @@ func (m Model) View() string {
 	lines = append(lines, top+border.Render("╮"))
 	lines = append(lines, side+strings.Repeat(" ", lw)+side+right(0)) // space under the titles
 	branchHead := ""
-	if showBranch(lw) {
-		branchHead = fmt.Sprintf("%-*s  ", branchCol, "GIT")
+	branchWidth := m.branchWidth(lw)
+	if branchWidth > 0 {
+		branchHead = fmt.Sprintf("%-*s  ", branchWidth, "GIT")
 	}
 	head := fmt.Sprintf("    %-*s %5s  %-*s  %s%s", statusCol, "STATUS", "LAST", agentCol, "AGENT", branchHead, "SESSION")
 	lines = append(lines, side+padTo(colHead.Render(head), lw, lipgloss.NewStyle())+side+right(1))
@@ -1232,7 +1233,7 @@ func (m Model) View() string {
 	for i := 0; i < m.avail(); i++ {
 		row := strings.Repeat(" ", lw)
 		if start+i < end {
-			row = m.renderRow(start+i, lw)
+			row = m.renderRow(start+i, lw, branchWidth)
 		}
 		lines = append(lines, side+row+side+right(i+3))
 	}
@@ -1660,7 +1661,7 @@ func statusWord(s agents.Session) string {
 
 // renderRow draws row i exactly w cells wide. Every segment carries the selection
 // background itself, since an inner ANSI reset would end an outer one early.
-func (m Model) renderRow(i, w int) string {
+func (m Model) renderRow(i, w, branchWidth int) string {
 	r := m.rows[i]
 	if r.spacer {
 		return strings.Repeat(" ", w)
@@ -1702,21 +1703,32 @@ func (m Model) renderRow(i, w int) string {
 			// Not bold: bold orange "claude" read as bigger than "codex".
 			st(plain.Foreground(agentColor[s.Agent])).Render(fmt.Sprintf("%-*s", agentCol, s.Agent)),
 		)
-		if showBranch(w) {
-			cell := ansi.Truncate(s.BranchLabel(), branchCol, "…")
-			parts = append(parts, st(plain).Render("  "+cell+strings.Repeat(" ", branchCol-ansi.StringWidth(cell))))
+		if branchWidth > 0 {
+			cell := ansi.Truncate(s.BranchLabel(), branchWidth, "…")
+			parts = append(parts, st(plain).Render("  "+cell+strings.Repeat(" ", branchWidth-ansi.StringWidth(cell))))
 		}
-		parts = append(parts, st(plain).Render("  "+s.Name))
+		// The name gets what is left, minus a margin before the details pane's border
+		// or the window's edge, so a cut name doesn't run into it.
+		room := w - ansi.StringWidth(strings.Join(parts, "")) - 2 - nameMargin
+		parts = append(parts, st(plain).Render("  "+ansi.Truncate(s.Name, max(1, room), "…")))
 	}
 	return padTo(strings.Join(parts, ""), w, st(plain))
 }
 
-// branchCol is the GIT column's width; longer names are cut with "…".
-const branchCol = 16
-
-// showBranch: the GIT column needs a list pane this wide, or session names
-// get too little room.
-func showBranch(listW int) bool { return listW >= 70 }
+// branchWidth leaves 24 cells for SESSION after the fixed columns and gaps (32 cells).
+func (m Model) branchWidth(listW int) int {
+	available := listW - 32 - 24
+	if available < 12 {
+		return 0
+	}
+	width := 12
+	for _, r := range m.rows {
+		if r.s != nil {
+			width = max(width, ansi.StringWidth(r.s.BranchLabel()))
+		}
+	}
+	return min(width, 32, available)
+}
 
 // gitLines are the details pane's branch lines: the branch (the one the agent
 // recorded, else the folder's current one), and the current one when it differs.
@@ -1737,6 +1749,9 @@ func gitLines(s agents.Session, label func(k, v string) string) []string {
 	}
 	return lines
 }
+
+// nameMargin is the space kept free after a cut session name.
+const nameMargin = 2
 
 // agentCol fits the longest agent name, "opencode".
 const agentCol = 8

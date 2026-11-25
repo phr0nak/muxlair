@@ -59,7 +59,7 @@ Not every feature works the same for every agent. See [Agent support](#agent-sup
   | `rex` | Jumps to its tab | Opens it in a new tab |
 
 - **Rename** with `r`. The name changes in the agent too, and in the session's terminal title (its `tmux` window, `cmux` tab or `rex` tab, when it doesn't share it with other terminals). A rename made inside the agent shows up in `muxlair` right away. Some agents limit this; see [Agent support](#agent-support).
-- **Git** column, between `AGENT` and `SESSION`: the branch the session ran on, as the agent recorded it, else the folder's branch now. It hides when the list is narrow.
+- **Git** column, between `AGENT` and `SESSION`: the branch the session ran on, as the agent recorded it, else the folder's branch now. It grows with the longest listed branch (up to 32 cells) and hides when the list cannot leave 24 cells for the session name.
 
   | `GIT` shows | Meaning |
   |---|---|
