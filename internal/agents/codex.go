@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -72,10 +73,10 @@ func listCodex() ([]Session, error) {
 			// knows it exists (`codex delete <id>` removes it).
 			s.Dead = true
 		}
-		s.Resume = "cd " + shellQuote(s.Cwd) + " && codex resume " + shellQuote(s.ID)
+		s.Resume = "cd " + shellQuote(s.Cwd) + " && codex resume " + codexNoDaemon() + shellQuote(s.ID)
 		if h := os.Getenv("CODEX_HOME"); h != "" {
 			// New tmux windows inherit the server's env, not ours; pin the home we listed from.
-			s.Resume = "cd " + shellQuote(s.Cwd) + " && CODEX_HOME=" + shellQuote(h) + " codex resume " + shellQuote(s.ID)
+			s.Resume = "cd " + shellQuote(s.Cwd) + " && CODEX_HOME=" + shellQuote(h) + " codex resume " + codexNoDaemon() + shellQuote(s.ID)
 		}
 		out = append(out, s)
 	}
@@ -84,6 +85,27 @@ func listCodex() ([]Session, error) {
 	}
 	attachCodexProcs(out)
 	return out, nil
+}
+
+var (
+	noDaemonOnce sync.Once
+	noDaemonArg  string
+)
+
+// codexNoDaemon is "--no-daemon " when the installed codex has that flag, else "".
+// In the shared app-server daemon a closed session stays loaded (its rollout
+// open) for thread_unload_delay_secs, 60 s by default, so it would look open
+// that long after its terminal closes; run on its own, codex holds the rollout
+// itself and lets go when it exits. An older codex without the flag would
+// refuse to resume, so it is only added when codex lists it.
+func codexNoDaemon() string {
+	noDaemonOnce.Do(func() {
+		out, _ := exec.Command("codex", "resume", "--help").CombinedOutput()
+		if bytes.Contains(out, []byte("--no-daemon")) {
+			noDaemonArg = "--no-daemon "
+		}
+	})
+	return noDaemonArg
 }
 
 // codexIndexNames reads $CODEX_HOME/session_index.jsonl; the last entry per id wins.

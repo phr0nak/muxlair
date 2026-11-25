@@ -53,10 +53,11 @@ func TestListClaude(t *testing.T) {
 
 func TestResumeID(t *testing.T) {
 	for in, want := range map[string]string{
-		"resume abc":            "abc",
-		"--yolo resume --x abc": "abc",
-		"exec hi":               "",
-		"resume":                "",
+		"resume abc":             "abc",
+		"resume --no-daemon abc": "abc", // how muxlair reopens a session
+		"--yolo resume --x abc":  "abc",
+		"exec hi":                "",
+		"resume":                 "",
 	} {
 		if got := resumeID(strings.Fields(in)); got != want {
 			t.Errorf("%q: got %q", in, got)

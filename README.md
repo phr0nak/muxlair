@@ -234,6 +234,7 @@ An answer that stopped early (interrupted, or at a tool call) is marked as such,
 
 - **Platforms.** Developed and tested on macOS. Linux is partially tested only. Windows is not supported.
 - **`rex` tabs have no color**, so `color_tabs` only applies in `tmux` and `cmux`.
+- **A Codex you start yourself can look open for a minute after you close it.** Codex's shared background server keeps a closed session loaded for 60 s (its `thread_unload_delay_secs` setting). Sessions `muxlair` reopens run without that server (`codex resume --no-daemon`), so they show `exited` right away.
 
 ## License
 
