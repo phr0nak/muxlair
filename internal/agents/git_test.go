@@ -87,6 +87,7 @@ func TestBranchLabel(t *testing.T) {
 		{Session{Git: GitInfo{Repo: true, Branch: "main"}}, "main", true},
 		{Session{Branch: "feat/x", Git: GitInfo{Repo: true, Worktree: true}}, "↳ feat/x", false},
 		{Session{}, "—", true},
+		{Session{Branch: "HEAD", Git: GitInfo{Repo: true, Branch: "main"}}, "detached", false},
 	} {
 		if got := c.s.BranchLabel(); got != c.want {
 			t.Errorf("%+v: label %q, want %q", c.s, got, c.want)
