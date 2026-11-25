@@ -1217,7 +1217,7 @@ func (m Model) View() string {
 	lines = append(lines, side+strings.Repeat(" ", lw)+side+right(0)) // space under the titles
 	branchHead := ""
 	if showBranch(lw) {
-		branchHead = fmt.Sprintf("%-*s  ", branchCol, "BRANCH")
+		branchHead = fmt.Sprintf("%-*s  ", branchCol, "GIT")
 	}
 	head := fmt.Sprintf("    %-*s %5s  %-*s  %s%s", statusCol, "STATUS", "LAST", agentCol, "AGENT", branchHead, "SESSION")
 	lines = append(lines, side+padTo(colHead.Render(head), lw, lipgloss.NewStyle())+side+right(1))
@@ -1711,10 +1711,10 @@ func (m Model) renderRow(i, w int) string {
 	return padTo(strings.Join(parts, ""), w, st(plain))
 }
 
-// branchCol is the BRANCH column's width; longer names are cut with "…".
+// branchCol is the GIT column's width; longer names are cut with "…".
 const branchCol = 16
 
-// showBranch: the BRANCH column needs a list pane this wide, or session names
+// showBranch: the GIT column needs a list pane this wide, or session names
 // get too little room.
 func showBranch(listW int) bool { return listW >= 70 }
 

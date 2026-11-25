@@ -59,7 +59,16 @@ Not every feature works the same for every agent. See [Agent support](#agent-sup
   | `rex` | Jumps to its tab | Opens it in a new tab |
 
 - **Rename** with `r`. The name changes in the agent too, and in the session's terminal title (its `tmux` window, `cmux` tab or `rex` tab, when it doesn't share it with other terminals). A rename made inside the agent shows up in `muxlair` right away. Some agents limit this; see [Agent support](#agent-support).
-- **Git branch** in the `BRANCH` column and the details pane: the branch the session ran on, as the agent recorded it, else the folder's branch now. `↳` marks a session that ran in a linked [git worktree](https://git-scm.com/docs/git-worktree), and the details pane shows its main checkout. The column hides when the list is narrow.
+- **Git** column, between `AGENT` and `SESSION`: the branch the session ran on, as the agent recorded it, else the folder's branch now. It hides when the list is narrow.
+
+  | `GIT` shows | Meaning |
+  |---|---|
+  | `main` | The session ran on that branch, in the repository's main checkout. |
+  | `↳ feat/login` | It ran on that branch in a linked [git worktree](https://git-scm.com/docs/git-worktree): a separate folder made with `git worktree add`. The details pane shows the main checkout it belongs to. |
+  | `detached@1a2b3c4` | The folder had no branch checked out, only that commit. |
+  | `—` | The folder isn't in a git repository. |
+
+  The details pane also shows the folder's branch now, when it differs from the session's.
 - **Details pane** with the session's ID, branch, folder, file, start time, last activity, model, tokens and cost, as far as the agent records them.
 - **Conversation peek**: your last prompt and the agent's answer, in the details pane and in full with `p`. See [Conversation peek](#conversation-peek).
 - **Mouse**: scroll, click, double-click to open, drag the divider to resize the details pane, and drag across details text to copy it.
@@ -137,7 +146,7 @@ Anything else exits with status 2 and an error message.
 | `ID` | The agent's session ID. |
 | `UPDATED` | Last activity, `YYYY-MM-DD HH:MM`. |
 | `AGENT` | `claude`, `codex`, `opencode`, `pi` or `agy`. |
-| `BRANCH` | The session's git branch (`↳` for a linked worktree, `—` outside git). |
+| `GIT` | The session's git branch, as in the dashboard's `GIT` column (`↳` for a linked worktree, `—` outside git). |
 | `TTY` | The session's terminal, empty when it isn't running. |
 | `MAYBELIVE` | `true` when the session shows `in use?`. |
 | `CWD` | The folder the session ran in. |

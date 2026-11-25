@@ -1123,7 +1123,7 @@ func TestStatusExpires(t *testing.T) {
 	}
 }
 
-// The BRANCH column sits between AGENT and SESSION when the list is wide enough.
+// The GIT column sits between AGENT and SESSION when the list is wide enough.
 func TestBranchColumn(t *testing.T) {
 	m := New(Options{}, "")
 	m.sessions = []agents.Session{{Agent: "claude", ID: "1", Name: "fix it", Cwd: "/a", Updated: time.Now(),
@@ -1131,14 +1131,14 @@ func TestBranchColumn(t *testing.T) {
 	m.rebuild()
 	m.height, m.width = 20, 140
 	v := ansi.Strip(m.View())
-	if !strings.Contains(v, "AGENT     BRANCH") || !strings.Contains(v, "↳ feat/a-rather…") {
+	if !strings.Contains(v, "AGENT     GIT") || !strings.Contains(v, "↳ feat/a-rather…") {
 		t.Fatalf("wide:\n%s", v)
 	}
 	if i, j := strings.Index(v, "↳ feat"), strings.Index(v, "fix it"); i < 0 || j < i {
 		t.Fatalf("branch must come before the session name:\n%s", v)
 	}
 	m.width = 60
-	if v := ansi.Strip(m.View()); strings.Contains(v, "BRANCH") || strings.Contains(v, "↳") {
+	if v := ansi.Strip(m.View()); strings.Contains(v, "GIT ") || strings.Contains(v, "↳") {
 		t.Fatalf("narrow: the column should be hidden:\n%s", v)
 	}
 }
