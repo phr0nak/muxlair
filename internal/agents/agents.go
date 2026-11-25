@@ -101,7 +101,12 @@ func (s Session) BranchLabel() string {
 func (s Session) ShownBranch() (branch string, current bool) {
 	switch s.Branch {
 	case "":
-	case "HEAD": // what an agent records with no branch checked out; it saves no commit
+	case "HEAD":
+		// Claude records "HEAD" both with no branch checked out and outside git;
+		// only the folder tells them apart. No commit is recorded either way.
+		if !s.Git.Repo {
+			return "", true
+		}
 		return "detached", false
 	default:
 		return s.Branch, false
