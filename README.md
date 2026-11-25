@@ -65,7 +65,7 @@ Not every feature works the same for every agent. See [Agent support](#agent-sup
   |---|---|
   | `main` | The session ran on that branch, in the repository's main checkout. |
   | `↳ feat/login` | It ran on that branch in a linked [git worktree](https://git-scm.com/docs/git-worktree): a separate folder made with `git worktree add`. The details pane shows the main checkout it belongs to. |
-  | `detached@1a2b3c4` | The folder had no branch checked out, only that commit. |
+  | `detached@1a2b3c4` | No branch was checked out, only that commit (a rebase, or a checked-out tag or commit). `detached` alone when the agent didn't record the commit. |
   | `—` | The folder isn't in a git repository. |
 
   The details pane also shows the folder's branch now, when it differs from the session's.

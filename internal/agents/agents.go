@@ -99,7 +99,11 @@ func (s Session) BranchLabel() string {
 // ShownBranch is the branch to show for s: the one the agent recorded, else
 // the folder's current one (current is then true).
 func (s Session) ShownBranch() (branch string, current bool) {
-	if s.Branch != "" {
+	switch s.Branch {
+	case "":
+	case "HEAD": // what an agent records with no branch checked out; it saves no commit
+		return "detached", false
+	default:
 		return s.Branch, false
 	}
 	return s.Git.Branch, true
