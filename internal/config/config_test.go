@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestLoad(t *testing.T) {
@@ -19,20 +18,15 @@ func TestLoad(t *testing.T) {
 	if err != nil || o != Defaults() {
 		t.Fatalf("defaults: %+v %v", o, err)
 	}
-	if o, _ = Load(write(`{"auto_delete_headless":"off","mouse":false}`)); o.AutoDelete != 0 || o.Mouse || !o.Details {
-		t.Fatalf("off: %+v", o)
+	// A config from before v0.5.0 still loads: the removed auto-delete key is ignored.
+	if o, err = Load(write(`{"auto_delete_headless":"soon","mouse":false}`)); err != nil || o.Mouse || !o.Details {
+		t.Fatalf("old key: %+v %v", o, err)
 	}
 	if o, _ = Load(write(`{"conversation_peek":false}`)); o.Peek || !o.Details {
 		t.Fatalf("peek off: %+v", o)
 	}
 	if !Defaults().Peek {
 		t.Fatal("the conversation peek should be on by default")
-	}
-	if o, _ = Load(write(`{"auto_delete_headless":"90s"}`)); o.AutoDelete != 90*time.Second {
-		t.Fatalf("90s: %+v", o)
-	}
-	if _, err = Load(write(`{"auto_delete_headless":"soon"}`)); err == nil {
-		t.Fatal("accepted a bad duration")
 	}
 	if _, err = Load(write(`{broken`)); err == nil {
 		t.Fatal("accepted broken JSON")
@@ -45,8 +39,8 @@ func TestLoad(t *testing.T) {
 
 func TestSaveRoundTripKeepsUnknownKeys(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
-	os.WriteFile(p, []byte(`{"future_option": 7, "mouse": true}`), 0o600)
-	want := Options{Mouse: false, ColorTabs: true, Details: false, Peek: false, AutoDelete: 90 * time.Minute}
+	os.WriteFile(p, []byte(`{"future_option": 7, "mouse": true, "auto_delete_headless": "10m"}`), 0o600)
+	want := Options{Mouse: false, ColorTabs: true, Details: false, Peek: false}
 	if err := Save(p, want); err != nil {
 		t.Fatal(err)
 	}
@@ -55,19 +49,8 @@ func TestSaveRoundTripKeepsUnknownKeys(t *testing.T) {
 		t.Fatalf("round trip: %+v %v", got, err)
 	}
 	b, _ := os.ReadFile(p)
-	if !strings.Contains(string(b), `"future_option": 7`) || !strings.Contains(string(b), `"1h30m"`) {
+	if !strings.Contains(string(b), `"future_option": 7`) || strings.Contains(string(b), "auto_delete_headless") {
 		t.Fatalf("file:\n%s", b)
-	}
-}
-
-func TestFormatDuration(t *testing.T) {
-	for d, want := range map[time.Duration]string{0: "off", 10 * time.Minute: "10m", time.Hour: "1h", 90 * time.Second: "1m30s", 45 * time.Second: "45s", 90 * time.Minute: "1h30m"} {
-		if got := FormatDuration(d); got != want {
-			t.Errorf("%v: got %q want %q", d, got, want)
-		}
-		if back, err := ParseDuration(FormatDuration(d)); err != nil || back != d {
-			t.Errorf("%v: round trip %v %v", d, back, err)
-		}
 	}
 }
 

@@ -17,8 +17,6 @@ import (
 // transcriptMeta is what we extract from one Claude .jsonl transcript.
 type transcriptMeta struct {
 	cwd, title, aiTitle, lastPrompt string
-	entrypoint                      string // first record's: "cli" interactive, "sdk-cli" for claude -p
-	interactive                     bool   // some record came from an interactive run (e.g. resumed later)
 }
 
 type cacheEntry struct {
@@ -42,8 +40,16 @@ type claudeLive struct {
 	UpdatedAt  int64  `json:"updatedAt"`
 	StartedAt  int64  `json:"startedAt"`
 	NameSource string `json:"nameSource"` // "user" after /rename, "derived" when auto-named
-	Entrypoint string `json:"entrypoint"` // "sdk-cli" for claude -p
 	tty        string
+}
+
+func claudeWatchPaths() []string {
+	paths := []string{
+		filepath.Join(Home, ".claude", "sessions"),
+		filepath.Join(Home, ".claude", "projects"), // new project dirs get watched as they appear
+	}
+	dirs, _ := filepath.Glob(filepath.Join(Home, ".claude", "projects", "*"))
+	return append(paths, dirs...)
 }
 
 // Unnamed is shown for a Claude session that has no title and no prompt yet.
@@ -61,9 +67,8 @@ func listClaude() ([]Session, error) {
 		}
 		m := claudeMeta(f, st)
 		id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
-		s := Session{Agent: "claude", ID: id, Cwd: m.cwd, Updated: st.ModTime(), Files: claudeFiles(f, id)}
+		s := Session{Agent: "claude", ID: id, Cwd: m.cwd, Updated: st.ModTime(), Files: []string{f}}
 		s.Name = firstNonEmpty(m.title, m.aiTitle, m.lastPrompt, Unnamed)
-		s.Headless = m.entrypoint == "sdk-cli" && !m.interactive
 		if s.Cwd == "" {
 			s.Cwd = filepath.Base(filepath.Dir(f))
 		}
@@ -82,14 +87,6 @@ func listClaude() ([]Session, error) {
 		}
 		s := &out[i]
 		s.PID, s.TTY = l.PID, l.tty
-		if l.Entrypoint == "sdk-cli" {
-			s.Headless = true
-		} else if l.Entrypoint != "" && s.Headless {
-			// A headless transcript resumed interactively. Remember it: if they
-			// exit without a new record, the transcript alone would look headless.
-			noteInteractive(s.Key())
-			s.Headless = false
-		}
 		s.Status = Idle
 		if l.Status == "busy" {
 			s.Status = Busy
@@ -113,7 +110,7 @@ func listClaude() ([]Session, error) {
 }
 
 // claudeLiveSessions errors if a live process's record can't be read: its session
-// would otherwise look exited, and a delete could move files Claude is writing.
+// would otherwise look exited, and muxlair could open it a second time.
 func claudeLiveSessions() ([]claudeLive, error) {
 	files, _ := filepath.Glob(filepath.Join(Home, ".claude", "sessions", "*.json"))
 	var out []claudeLive
@@ -145,7 +142,7 @@ func claudeLiveSessions() ([]claudeLive, error) {
 	kept := out[:0]
 	for _, l := range out {
 		// A process that started after the record was written is a reused PID, not Claude.
-		// If ps fails, keep the record: treating a live session as exited risks trashing it.
+		// If ps fails, keep the record: treating a live session as exited risks opening it twice.
 		st, ok := stats[l.PID]
 		if ok && st.started.Unix() > l.StartedAt/1000+1 {
 			continue
@@ -182,16 +179,12 @@ func parseClaudeTranscript(path string) transcriptMeta {
 		isTitle := bytes.Contains(line, []byte(`"custom-title"`)) || bytes.Contains(line, []byte(`"ai-title"`))
 		isPrompt := bytes.Contains(line, []byte(`"last-prompt"`))
 		needCwd := m.cwd == "" && bytes.Contains(line, []byte(`"cwd"`))
-		if bytes.Contains(line, []byte(`"entrypoint":"cli"`)) {
-			m.interactive = true
-		}
 		if !isTitle && !isPrompt && !needCwd {
 			continue
 		}
 		var r struct {
 			Type        string `json:"type"`
 			Cwd         string `json:"cwd"`
-			Entrypoint  string `json:"entrypoint"`
 			CustomTitle string `json:"customTitle"`
 			AITitle     string `json:"aiTitle"`
 			LastPrompt  string `json:"lastPrompt"`
@@ -200,7 +193,7 @@ func parseClaudeTranscript(path string) transcriptMeta {
 			continue
 		}
 		if m.cwd == "" {
-			m.cwd, m.entrypoint = r.Cwd, r.Entrypoint // same record carries both
+			m.cwd = r.Cwd
 		}
 		switch r.Type {
 		case "custom-title":
@@ -211,24 +204,7 @@ func parseClaudeTranscript(path string) transcriptMeta {
 			m.lastPrompt = oneLine(r.LastPrompt) // full text; the UI truncates for display
 		}
 	}
-	if sc.Err() != nil {
-		m.interactive = true // unread records might be an interactive resume: never auto-delete
-	}
 	return m
-}
-
-// claudeFiles lists everything belonging to a transcript that Trash should move.
-func claudeFiles(jsonl, id string) []string {
-	files := []string{jsonl}
-	for _, p := range []string{
-		strings.TrimSuffix(jsonl, ".jsonl"), // subagent transcripts, tool results
-		filepath.Join(Home, ".claude", "file-history", id),
-	} {
-		if _, err := os.Stat(p); err == nil {
-			files = append(files, p)
-		}
-	}
-	return files
 }
 
 func firstNonEmpty(ss ...string) string {
