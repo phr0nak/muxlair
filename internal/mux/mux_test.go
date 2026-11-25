@@ -149,3 +149,70 @@ func TestCodexPromptEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestRexLabel(t *testing.T) {
+	for in, want := range map[string]string{"fix login": "fix login", "--rm -rf": "rm -rf", "--": "session", "- ": "session"} {
+		if got := rexLabel(in); got != want {
+			t.Errorf("rexLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCurrentPrefersRexOverCmux(t *testing.T) {
+	t.Setenv("TMUX", "")
+	t.Setenv("CMUX_WORKSPACE_ID", "ws")
+	t.Setenv("REX_SESSION", "session:1")
+	if got := Current(); got != "rex" {
+		t.Fatalf("got %q", got)
+	}
+	t.Setenv("TMUX", "/tmp/tmux-501/default,1,0")
+	if got := Current(); got != "tmux" {
+		t.Fatalf("nested tmux: got %q", got)
+	}
+}
+
+func TestRexTargetMap(t *testing.T) {
+	blocks, err := parseRexBlocks(`[{"session":"s1","window":"w1","block":"b1","pid":10},
+		{"session":"s1","window":"w2","block":"b2","pid":20},{"session":"s1","window":"w2","block":"b3","pid":30},
+		{"session":"s2","window":"w3","block":"b4","pid":40},{"session":"s1","window":"w1","block":"b5","pid":0}]`)
+	if err != nil || len(blocks) != 5 {
+		t.Fatalf("%v %+v", err, blocks)
+	}
+	m := rexTargetMap(blocks, "   10 ttys001\n   20 ttys002\n   30 ??\n   40 ttys004\n")
+	// b5 has no running program, but it shares w1 with b1.
+	if got := m["ttys001"]; got != (Target{Mux: "rex", Pane: "b1", Window: "w1", Workspace: "s1"}) {
+		t.Fatalf("ttys001: %+v", got)
+	}
+	if m["ttys002"].Solo || !m["ttys004"].Solo || len(m) != 3 {
+		t.Fatalf("a shared tab is not solo; no tty or no ps line means no target: %+v", m)
+	}
+	if bs, err := parseRexBlocks("{}\n"); err != nil || bs != nil {
+		t.Fatalf("empty result: %v %v", bs, err)
+	}
+}
+
+func TestRexVTKeepsOnlySGR(t *testing.T) {
+	in := "\x1b]0;title\x07\x1b[1G\x1b[2m❯\x1b[3CTry it\x1b[K\x1b[0m"
+	if got := rexVT(in); got != "\x1b[2m❯   Try it\x1b[0m" {
+		t.Fatalf("got %q", got)
+	}
+	// The result feeds the same prompt check as tmux -e: a dim example prompt is empty.
+	screen := "──────\n" + rexVT("\x1b[39m❯\x1b[1C\x1b[2mTry \"fix the bug\"\x1b[0m") + "\n──────"
+	if !promptEmpty(screen) {
+		t.Fatalf("dim placeholder not seen as empty: %q", screen)
+	}
+}
+
+func TestAgyPromptEmpty(t *testing.T) {
+	rule := "\x1b[0m\x1b[38;5;8m──────────\x1b[0m\r"
+	empty := strings.Join([]string{rule, "\x1b[0m\x1b[1m\x1b[38;5;4m> hello\x1b[0m\r", "\r", "  Hi!\r", "\r", rule, "\x1b[0m\x1b[38;5;12m>\x1b[0m\r", rule, "? for shortcuts"}, "\n")
+	if !agyPromptEmpty(empty) {
+		t.Fatal("empty input box not recognized")
+	}
+	if agyPromptEmpty(strings.Replace(empty, "\x1b[38;5;12m>\x1b", "\x1b[38;5;12m> half a draft\x1b", 1)) {
+		t.Fatal("a draft counted as empty")
+	}
+	if agyPromptEmpty("> quoted line\nno box here") {
+		t.Fatal("a line without its rules counted as the input box")
+	}
+}

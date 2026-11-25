@@ -13,31 +13,64 @@ import (
 	"unicode/utf8"
 )
 
-// Target is a terminal (tmux pane or cmux surface) hosting a session.
+// Target is a terminal (tmux pane, cmux surface or Rex block) hosting a session.
 type Target struct {
-	Mux       string // "tmux" or "cmux"
-	Pane      string // tmux pane id (%3) or cmux surface ref
-	Window    string // tmux window id or cmux window ref
-	Workspace string // cmux workspace ref; tmux session name
+	Mux       string // "tmux", "cmux" or "rex"
+	Pane      string // tmux pane id (%3), cmux surface ref or Rex block id
+	Window    string // tmux window id, cmux window ref or Rex window (tab) id
+	Workspace string // cmux workspace ref; tmux session name; Rex session id
 	CmuxPane  string // cmux pane ref
 	Solo      bool   // only terminal in its tmux window / cmux workspace
 }
 
-// Current reports which multiplexer muxlair itself runs in: "cmux", "tmux" or "".
-// tmux wins when nested, since that is the client the user is looking at.
+// Current reports which multiplexer muxlair itself runs in: "tmux", "rex", "cmux"
+// or "". tmux wins when nested, since that is the client the user is looking at.
+// Rex comes before cmux: a Rex app started from a cmux shell inherits cmux's
+// variables, while cmux panes never get REX_SESSION.
 func Current() string {
 	switch {
-	case os.Getenv("TMUX") != "":
+	case os.Getenv("TMUX") != "" && (os.Getenv("REX_SESSION") == "" || inTmuxPane()):
 		return "tmux"
+	case os.Getenv("REX_SESSION") != "":
+		return "rex"
 	case os.Getenv("CMUX_WORKSPACE_ID") != "":
 		return "cmux"
 	}
 	return ""
 }
 
-// Targets maps tty name ("ttys023") to the terminal that owns it, across tmux and cmux.
+// inTmuxPane reports whether muxlair's own terminal is the tmux pane named by
+// TMUX_PANE. With both TMUX and REX_SESSION set, either tmux runs inside a Rex tab
+// (yes) or the Rex server was started from a tmux shell and every Rex tab
+// inherited TMUX (no). If it can't tell, it says yes: the old behavior.
+func inTmuxPane() bool {
+	pane, err := output("tmux", "display-message", "-p", "-t", os.Getenv("TMUX_PANE"), "#{pane_tty}")
+	if err != nil {
+		return true
+	}
+	own, err := ownTTY()
+	if err != nil {
+		return true
+	}
+	return own == pane
+}
+
+// ownTTY is the terminal muxlair runs in, e.g. "/dev/ttys006" (a variable for tests).
+var ownTTY = func() (string, error) {
+	cmd := exec.Command("tty")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// Targets maps tty name ("ttys023") to the terminal that owns it, across tmux,
+// cmux and Rex. tmux comes last: a tmux client inside a Rex tab or cmux surface
+// owns its panes' ttys, not the outer terminal's.
 func Targets() map[string]Target {
 	m := map[string]Target{}
+	for tty, t := range rexTargets() {
+		m[tty] = t
+	}
 	for tty, t := range cmuxTargets() {
 		m[tty] = t
 	}
@@ -48,34 +81,29 @@ func Targets() map[string]Target {
 }
 
 func Focus(t Target) error {
-	if t.Mux == "tmux" {
+	switch t.Mux {
+	case "tmux":
 		return tmuxFocus(t)
+	case "rex":
+		return rexFocus(t)
 	}
 	return cmuxFocus(t)
 }
 
 func Rename(t Target, name string) error {
-	if t.Mux == "tmux" {
+	switch t.Mux {
+	case "tmux":
 		return tmuxRename(t, name)
+	case "rex":
+		return rexRename(t, name)
 	}
 	return cmuxRename(t, name)
 }
 
-// Open starts cmd (a shell command) in cwd. workspace=true forces a new cmux workspace.
-// color ("#RRGGBB", or "" for none) tints the new tmux window tab or cmux workspace;
-// a cmux pane opened inside the current workspace has no tab color to set.
-func Open(name, cwd, cmd, color string, workspace bool) error {
-	if workspace {
-		out, err := output(cmuxBin(), "new-workspace", "--name", name, "--cwd", cwd, "--command", cmd, "--focus", "true")
-		if err != nil || color == "" {
-			return err
-		}
-		ws := workspaceRef(out)
-		if ws == "" {
-			return fmt.Errorf("cmux new-workspace: no workspace ref in %q", out)
-		}
-		return run(cmuxBin(), "workspace-action", "--action", "set-color", "--workspace", ws, "--color", color)
-	}
+// Open starts cmd (a shell command) in cwd, in whatever muxlair runs in: a new
+// tmux window, cmux workspace or Rex tab, named name. color ("#RRGGBB", or "" for
+// none) tints the tmux window's tab or the cmux workspace; Rex tabs have no color.
+func Open(name, cwd, cmd, color string) error {
 	switch Current() {
 	case "tmux":
 		win, err := output("tmux", "new-window", "-P", "-F", "#{window_id}", "-n", name, "-c", cwd, cmd)
@@ -86,10 +114,20 @@ func Open(name, cwd, cmd, color string, workspace bool) error {
 			return err
 		}
 		return run("tmux", "set-option", "-w", "-t", win, "window-status-current-style", "fg="+color+",bold")
+	case "rex":
+		return rexOpen(name, cwd, cmd)
 	case "cmux":
-		return run(cmuxBin(), "new-pane", "--direction", "right", "--command", cmd, "--focus", "true")
+		out, err := output(cmuxBin(), "new-workspace", "--name", name, "--cwd", cwd, "--command", cmd, "--focus", "true")
+		if err != nil || color == "" {
+			return err
+		}
+		ws := workspaceRef(out)
+		if ws == "" {
+			return fmt.Errorf("cmux new-workspace: no workspace ref in %q", out)
+		}
+		return run(cmuxBin(), "workspace-action", "--action", "set-color", "--workspace", ws, "--color", color)
 	}
-	return fmt.Errorf("not inside tmux or cmux")
+	return fmt.Errorf("not inside tmux, cmux or Rex")
 }
 
 // workspaceRef extracts "workspace:N" from cmux output like "OK workspace:12".
@@ -135,20 +173,23 @@ func output(name string, args ...string) (string, error) {
 // (Codex does, with no pause at all; 50ms was enough in testing).
 const enterDelay = 200 * time.Millisecond
 
-// SendLine types text into an agent's prompt ("claude" or "codex") and presses
+// SendLine types text into an agent's prompt ("claude", "codex" or "agy") and presses
 // Enter. It refuses unless the prompt is empty, so a half-written draft is never
 // submitted. cmux guards Claude's prompt itself, but not Codex's (typing over a
-// Codex draft just appends to it), and tmux guards nothing: for those muxlair
+// Codex draft just appends to it), and tmux and Rex guard nothing: for those muxlair
 // reads the screen and looks for the agent's empty prompt. Where it can read the
 // screen it also checks that the prompt is empty again afterwards, so a line the
 // agent did not take is reported.
 func SendLine(t Target, agent, text string) error {
 	empty := promptEmpty
-	if agent == "codex" {
+	switch agent {
+	case "codex":
 		empty = codexPromptEmpty
+	case "agy":
+		empty = agyPromptEmpty
 	}
-	readable := t.Mux == "tmux" || agent == "codex"
-	styled := t.Mux == "tmux" && agent == "claude" // to tell its dim placeholder from a draft
+	readable := t.Mux != "cmux" || agent != "claude" // cmux guards only Claude's prompt
+	styled := t.Mux != "cmux" && agent == "claude"   // to tell its dim placeholder from a draft
 	if readable {
 		screen, err := screenOf(t, styled)
 		if err != nil {
@@ -159,7 +200,9 @@ func SendLine(t Target, agent, text string) error {
 		}
 	}
 	var err error
-	if t.Mux == "tmux" {
+	if t.Mux == "rex" {
+		err = rexSend(t, text)
+	} else if t.Mux == "tmux" {
 		if err = run("tmux", "send-keys", "-t", t.Pane, "-l", text); err == nil {
 			time.Sleep(enterDelay)
 			err = run("tmux", "send-keys", "-t", t.Pane, "Enter")
@@ -186,6 +229,9 @@ func SendLine(t Target, agent, text string) error {
 // screenOf returns the visible text of the terminal; styled keeps tmux's SGR
 // escapes (cmux's read-screen is plain text only).
 func screenOf(t Target, styled bool) (string, error) {
+	if t.Mux == "rex" {
+		return rexScreen(t, styled)
+	}
 	if t.Mux == "tmux" {
 		args := []string{"capture-pane", "-p", "-t", t.Pane}
 		if styled {
@@ -217,6 +263,21 @@ func codexPromptEmpty(screen string) bool {
 // found, counts as not empty. The screen may carry SGR styling (tmux capture -e):
 // a fresh session shows an example prompt in dim text, which counts as empty,
 // but only if all of it is dim (a draft is plain text).
+// agyPromptEmpty reports whether agy's input box, a "> " line between two
+// rules, holds nothing. An answer's own quoted "> " lines have no rules around them.
+func agyPromptEmpty(screen string) bool {
+	lines := strings.Split(screen, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSpace(sgrRe.ReplaceAllString(lines[i], ""))
+	}
+	for i := len(lines) - 2; i > 0; i-- {
+		if strings.HasPrefix(lines[i], ">") && strings.HasPrefix(lines[i-1], "─") && strings.HasPrefix(lines[i+1], "─") {
+			return strings.TrimSpace(strings.TrimPrefix(lines[i], ">")) == ""
+		}
+	}
+	return false
+}
+
 func promptEmpty(screen string) bool {
 	raw := strings.Split(screen, "\n")
 	lines := make([]string, len(raw))

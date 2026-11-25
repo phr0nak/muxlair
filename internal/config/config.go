@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 )
 
 // Options are the user settings. A missing file or key means the default.
@@ -16,22 +14,18 @@ type Options struct {
 	ColorTabs bool // tint tabs/workspaces muxlair opens with the agent's color; default on
 	Details   bool // show the details pane at startup (i toggles it); default on
 	Peek      bool // show the latest exchange of the conversation in the details pane and with p; default on
-	// AutoDelete trashes headless sessions (claude -p, codex exec/review) once
-	// exited and idle this long; 0 disables. Default 10m.
-	AutoDelete time.Duration
 }
 
 func Defaults() Options {
-	return Options{Mouse: true, ColorTabs: true, Details: true, Peek: true, AutoDelete: 10 * time.Minute}
+	return Options{Mouse: true, ColorTabs: true, Details: true, Peek: true}
 }
 
 // file is the on-disk shape; pointers tell "missing" from "false".
 type file struct {
-	Mouse      *bool   `json:"mouse"`
-	ColorTabs  *bool   `json:"color_tabs"`
-	Details    *bool   `json:"details"`
-	Peek       *bool   `json:"conversation_peek"`
-	AutoDelete *string `json:"auto_delete_headless"`
+	Mouse     *bool `json:"mouse"`
+	ColorTabs *bool `json:"color_tabs"`
+	Details   *bool `json:"details"`
+	Peek      *bool `json:"conversation_peek"`
 }
 
 // Load reads path; a missing file gives the defaults.
@@ -57,42 +51,7 @@ func Load(path string) (Options, error) {
 	set(&opts.ColorTabs, c.ColorTabs)
 	set(&opts.Details, c.Details)
 	set(&opts.Peek, c.Peek)
-	if c.AutoDelete != nil {
-		d, err := ParseDuration(*c.AutoDelete)
-		if err != nil {
-			return Defaults(), fmt.Errorf("%s: auto_delete_headless: %w", path, err)
-		}
-		opts.AutoDelete = d
-	}
 	return opts, nil
-}
-
-// ParseDuration accepts "off" (0) or a Go duration such as "30s", "10m", "2h".
-func ParseDuration(v string) (time.Duration, error) {
-	switch v = strings.TrimSpace(v); v {
-	case "off", "0", "":
-		return 0, nil
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d < 0 {
-		return 0, fmt.Errorf(`want a duration like "10m" or "off", got %q`, v)
-	}
-	return d, nil
-}
-
-// FormatDuration is ParseDuration's inverse: "off", "10m", "1h30m", "45s".
-func FormatDuration(d time.Duration) string {
-	if d <= 0 {
-		return "off"
-	}
-	s := d.String() // "10m0s", "1h0m0s", "1m30s"
-	if strings.HasSuffix(s, "m0s") {
-		s = strings.TrimSuffix(s, "0s")
-	}
-	if strings.HasSuffix(s, "h0m") {
-		s = strings.TrimSuffix(s, "0m")
-	}
-	return s
 }
 
 // Save writes opts to path, keeping any keys muxlair doesn't know, and
@@ -109,7 +68,7 @@ func Save(path string, opts Options) error {
 	m["color_tabs"] = opts.ColorTabs
 	m["details"] = opts.Details
 	m["conversation_peek"] = opts.Peek
-	m["auto_delete_headless"] = FormatDuration(opts.AutoDelete)
+	delete(m, "auto_delete_headless") // removed in v0.5.0 with auto-delete
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
