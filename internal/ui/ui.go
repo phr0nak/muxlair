@@ -1215,7 +1215,11 @@ func (m Model) View() string {
 	}
 	lines = append(lines, top+border.Render("╮"))
 	lines = append(lines, side+strings.Repeat(" ", lw)+side+right(0)) // space under the titles
-	head := fmt.Sprintf("    %-*s %5s  %-*s  %s", statusCol, "STATUS", "LAST", agentCol, "AGENT", "SESSION")
+	branchHead := ""
+	if showBranch(lw) {
+		branchHead = fmt.Sprintf("%-*s  ", branchCol, "GIT")
+	}
+	head := fmt.Sprintf("    %-*s %5s  %-*s  %s%s", statusCol, "STATUS", "LAST", agentCol, "AGENT", branchHead, "SESSION")
 	lines = append(lines, side+padTo(colHead.Render(head), lw, lipgloss.NewStyle())+side+right(1))
 	rule := border.Render("├") + hline(lw)
 	if dw > 0 {
@@ -1550,15 +1554,20 @@ func (m Model) detailLines(w, n int) []string {
 			label("Session", s.ID),
 			label("Status", statusWord(*s)+procInfo(*s)),
 		}
+		body = append(body, gitLines(*s, label)...)
+		folder := pathLines("Folder", s.Cwd)
+		if s.Git.Worktree { // a path too: with the others, so a short pane cuts it before the metrics
+			folder = append(folder, pathLines("Worktree", "of "+s.Git.Main)...)
+		}
 		// Wrapped paths go last, so in a short pane they are what gets cut, not the metrics.
 		d, ok := m.details[s.Key()]
 		switch {
 		case !ok:
 			body = append(body, label("", dim.Render("loading…")))
-			body = append(body, pathLines("Folder", s.Cwd)...)
+			body = append(body, folder...)
 		case d.err != "":
 			body = append(body, label("", dim.Render(d.err)))
-			body = append(body, pathLines("Folder", s.Cwd)...)
+			body = append(body, folder...)
 		default:
 			na := dim.Render("not recorded")
 			started, model, cost := na, na, na
@@ -1583,7 +1592,7 @@ func (m Model) detailLines(w, n int) []string {
 				label("Tokens", tokens),
 				label("Cost", cost),
 			)
-			body = append(body, pathLines("Folder", s.Cwd)...)
+			body = append(body, folder...)
 			body = append(body, pathLines("Location", d.d.Location)...)
 			if m.opts.Peek && !d.d.Peek.Empty() {
 				pk, pkBusy = &d.d.Peek, s.Status == agents.Busy
@@ -1692,10 +1701,41 @@ func (m Model) renderRow(i, w int) string {
 			st(plain).Render(fmt.Sprintf(" %5s  ", ago(s.Updated))),
 			// Not bold: bold orange "claude" read as bigger than "codex".
 			st(plain.Foreground(agentColor[s.Agent])).Render(fmt.Sprintf("%-*s", agentCol, s.Agent)),
-			st(plain).Render("  "+s.Name),
 		)
+		if showBranch(w) {
+			cell := ansi.Truncate(s.BranchLabel(), branchCol, "…")
+			parts = append(parts, st(plain).Render("  "+cell+strings.Repeat(" ", branchCol-ansi.StringWidth(cell))))
+		}
+		parts = append(parts, st(plain).Render("  "+s.Name))
 	}
 	return padTo(strings.Join(parts, ""), w, st(plain))
+}
+
+// branchCol is the GIT column's width; longer names are cut with "…".
+const branchCol = 16
+
+// showBranch: the GIT column needs a list pane this wide, or session names
+// get too little room.
+func showBranch(listW int) bool { return listW >= 70 }
+
+// gitLines are the details pane's branch lines: the branch (the one the agent
+// recorded, else the folder's current one), and the current one when it differs.
+func gitLines(s agents.Session, label func(k, v string) string) []string {
+	b, current := s.ShownBranch()
+	switch {
+	case b == "" && s.Git.Missing:
+		return []string{label("Branch", dim.Render("unknown: the folder is gone"))}
+	case b == "":
+		return []string{label("Branch", dim.Render("not a git folder"))}
+	}
+	if current {
+		b += dim.Render(" (the folder's branch now)")
+	}
+	lines := []string{label("Branch", b)}
+	if !current && s.Git.Repo && s.Git.Branch != "" && s.Git.Branch != s.Branch {
+		lines = append(lines, label("Now", s.Git.Branch+dim.Render(" (the folder's branch now)")))
+	}
+	return lines
 }
 
 // agentCol fits the longest agent name, "opencode".

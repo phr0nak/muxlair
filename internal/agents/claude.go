@@ -17,6 +17,7 @@ import (
 // transcriptMeta is what we extract from one Claude .jsonl transcript.
 type transcriptMeta struct {
 	cwd, title, aiTitle, lastPrompt string
+	branch                          string // the last gitBranch Claude recorded
 }
 
 type cacheEntry struct {
@@ -67,7 +68,7 @@ func listClaude() ([]Session, error) {
 		}
 		m := claudeMeta(f, st)
 		id := strings.TrimSuffix(filepath.Base(f), ".jsonl")
-		s := Session{Agent: "claude", ID: id, Cwd: m.cwd, Updated: st.ModTime(), Files: []string{f}}
+		s := Session{Agent: "claude", ID: id, Cwd: m.cwd, Updated: st.ModTime(), Files: []string{f}, Branch: m.branch}
 		s.Name = firstNonEmpty(m.title, m.aiTitle, m.lastPrompt, Unnamed)
 		if s.Cwd == "" {
 			s.Cwd = filepath.Base(filepath.Dir(f))
@@ -175,6 +176,9 @@ func parseClaudeTranscript(path string) transcriptMeta {
 	sc.Buffer(make([]byte, 1<<20), 64<<20)
 	for sc.Scan() {
 		line := sc.Bytes()
+		if b, ok := jsonStringField(line, `"gitBranch":`); ok {
+			m.branch = b // on most records; the last one (even "") is where the session is now
+		}
 		// Cheap prefilter: only decode lines we care about.
 		isTitle := bytes.Contains(line, []byte(`"custom-title"`)) || bytes.Contains(line, []byte(`"ai-title"`))
 		isPrompt := bytes.Contains(line, []byte(`"last-prompt"`))
@@ -205,6 +209,32 @@ func parseClaudeTranscript(path string) transcriptMeta {
 		}
 	}
 	return m
+}
+
+// jsonStringField returns the string value of the first `key` (e.g.
+// `"gitBranch":`) in a compact JSON line, without decoding the whole record.
+func jsonStringField(line []byte, key string) (string, bool) {
+	i := bytes.Index(line, []byte(key))
+	if i < 0 {
+		return "", false
+	}
+	rest := line[i+len(key):]
+	if len(rest) == 0 || rest[0] != '"' {
+		return "", false
+	}
+	for j := 1; j < len(rest); j++ {
+		switch rest[j] {
+		case '\\':
+			j++ // skip the escaped character
+		case '"':
+			var v string
+			if json.Unmarshal(rest[:j+1], &v) != nil {
+				return "", false
+			}
+			return v, true
+		}
+	}
+	return "", false
 }
 
 func firstNonEmpty(ss ...string) string {

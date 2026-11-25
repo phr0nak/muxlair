@@ -64,7 +64,8 @@ func main() {
 					fmt.Fprintf(os.Stderr, "muxlair: unknown agent %q (want %s)\n", os.Args[2], strings.Join(agents.Names(), ", "))
 					os.Exit(2)
 				}
-				list = a.List // only that agent is read, so another agent's error can't get in the way
+				// Only that agent is read, so another agent's error can't get in the way.
+				list = func() ([]agents.Session, error) { return agents.ListOf(a) }
 			}
 			listSessions(list)
 			return
@@ -101,10 +102,10 @@ func listSessions(list func() ([]agents.Session, error)) {
 		fmt.Fprintln(os.Stderr, err) // partial results still listed below
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0) // aligned columns; NAME last so its length can't push the rest around
-	fmt.Fprintln(w, "STATUS\tID\tUPDATED\tAGENT\tTTY\tMAYBELIVE\tCWD\tNAME")
+	fmt.Fprintln(w, "STATUS\tID\tUPDATED\tAGENT\tGIT\tTTY\tMAYBELIVE\tCWD\tNAME")
 	sort.Slice(ss, func(i, j int) bool { return ss[i].Updated.After(ss[j].Updated) })
 	for _, s := range ss {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%v\t%s\t%s\n", s.Status, s.ID, s.Updated.Format("2006-01-02 15:04"), s.Agent, s.TTY, s.MaybeLive, s.Cwd, firstWords(s.Name, 6))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%v\t%s\t%s\n", s.Status, s.ID, s.Updated.Format("2006-01-02 15:04"), s.Agent, s.BranchLabel(), s.TTY, s.MaybeLive, s.Cwd, firstWords(s.Name, 6))
 	}
 	w.Flush()
 }
